@@ -1,0 +1,16 @@
+[package]
+name = "snmp"
+version = "0.1.0"
+authors = ["Hroi Sigurdsson <hroi@asdf.dk>"]
+description = "SNMP client library"
+license = "MIT"
+repository = "https://github.com/hroi/rust-snmp"
+documentation = "https://hroi.github.com/snmp/"
+readme = "README.md"
+keywords = ["networking", "snmp", "monitoring"]
+exclude = ["test/*"]
+
+[dependencies]
+
+[features]
+private-tests = []
