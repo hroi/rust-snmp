@@ -29,7 +29,7 @@ Currently does not support:
 # Examples
 
 ## GET NEXT
-```no_run
+```rust
 use std::time::Duration;
 use snmp::{SyncSession, Value};
 
@@ -45,7 +45,7 @@ if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
 }
 ```
 ## GET BULK
-```no_run
+```rust
 use std::time::Duration;
 use snmp::SyncSession;
 
