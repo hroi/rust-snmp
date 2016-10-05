@@ -72,7 +72,7 @@
 //! }
 //! ```
 
-#![cfg_attr(all(test, feature = "private-tests"), feature(test))]
+//#![cfg_attr(all(test, feature = "private-tests"), feature(test))]
 
 use std::fmt;
 use std::io;
@@ -83,7 +83,7 @@ use std::ptr;
 use std::time::Duration;
 
 // I have some private devices and data I test against that are not suitable for publication.
-#[cfg(all(test, feature = "private-tests"))]
+#[cfg(test)]
 mod tests;
 
 #[derive(Debug, PartialEq)]
