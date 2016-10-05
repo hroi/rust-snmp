@@ -29,7 +29,7 @@
 //! ## TODO
 //! - Async requests
 //! - Walking function
-//! - Additional ObjectIdentifier utility methods
+//! - Additional `ObjectIdentifier` utility methods
 //! - Decouple PDU building/parsing from socket handling
 //! - SNMPv3 (would require an external dependency)
 //!
@@ -194,7 +194,7 @@ mod pdu {
 
         fn push_chunk(&mut self, chunk: &[u8]) {
             let offset = BUFFER_SIZE - self.len;
-            &mut self.buf[(offset - chunk.len())..offset].copy_from_slice(chunk);
+            self.buf[(offset - chunk.len())..offset].copy_from_slice(chunk);
             self.len += chunk.len();
         }
 
@@ -250,7 +250,7 @@ mod pdu {
                     let bytes = unsafe { mem::transmute::<usize, [u8; 8]>(len.to_be()) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
-                    &mut o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
+                    o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
                     length_len + 1
                 });
             }
@@ -411,7 +411,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
         return Err(SnmpError::AsnIntOverflow);
     }
     let mut bytes = [0u8; 8];
-    &mut bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
+    bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
 
     let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be()};
     {
@@ -595,7 +595,7 @@ impl<'a> AsnReader<'a> {
                 }
 
                 let mut bytes = [0u8; 8];
-                &mut bytes[(mem::size_of::<usize>() - length_len)..]
+                bytes[(mem::size_of::<usize>() - length_len)..]
                     .copy_from_slice(&tail[..length_len]);
 
                 o = unsafe { mem::transmute::<[u8; 8], usize>(bytes).to_be()};
@@ -839,7 +839,7 @@ impl<'a> fmt::Debug for Value<'a> {
         match *self {
             Boolean(v)                   => write!(f, "BOOLEAN: {}", v),
             Integer(n)                   => write!(f, "INTEGER: {}", n),
-            OctetString(ref slice)       => write!(f, "OCTET STRING: {}", String::from_utf8_lossy(slice)),
+            OctetString(slice)           => write!(f, "OCTET STRING: {}", String::from_utf8_lossy(slice)),
             ObjectIdentifier(ref obj_id) => write!(f, "OBJECT IDENTIFIER: {}", obj_id),
             Null                         => write!(f, "NULL"),
             Sequence(ref val)            => write!(f, "SEQUENCE: {:#?}", val),
@@ -872,19 +872,19 @@ impl<'a> Iterator for AsnReader<'a> {
         use Value::*;
         if let Ok(ident) = self.peek_byte() {
             let ret: SnmpResult<Value> = match ident {
-                asn1::TYPE_BOOLEAN          => self.read_asn_boolean().map(|v| Boolean(v)),
+                asn1::TYPE_BOOLEAN          => self.read_asn_boolean().map(Boolean),
                 asn1::TYPE_NULL             => self.read_asn_null().map(|_| Null),
-                asn1::TYPE_INTEGER          => self.read_asn_integer().map(|v| Integer(v)),
-                asn1::TYPE_OCTETSTRING      => self.read_asn_octetstring().map(|v| OctetString(v)),
-                asn1::TYPE_OBJECTIDENTIFIER => self.read_asn_objectidentifier().map(|v| ObjectIdentifier(v)),
+                asn1::TYPE_INTEGER          => self.read_asn_integer().map(Integer),
+                asn1::TYPE_OCTETSTRING      => self.read_asn_octetstring().map(OctetString),
+                asn1::TYPE_OBJECTIDENTIFIER => self.read_asn_objectidentifier().map(ObjectIdentifier),
                 asn1::TYPE_SEQUENCE         => self.read_raw(ident).map(|v| Sequence(AsnReader::from_bytes(v))),
                 asn1::TYPE_SET              => self.read_raw(ident).map(|v| Set(AsnReader::from_bytes(v))),
-                snmp::TYPE_IPADDRESS        => self.read_snmp_ipaddress().map(|v| IpAddress(v)),
-                snmp::TYPE_COUNTER32        => self.read_snmp_counter32().map(|v| Counter32(v)),
-                snmp::TYPE_UNSIGNED32       => self.read_snmp_unsigned32().map(|v| Unsigned32(v)),
-                snmp::TYPE_TIMETICKS        => self.read_snmp_timeticks().map(|v| Timeticks(v)),
-                snmp::TYPE_OPAQUE           => self.read_snmp_opaque().map(|v| Opaque(v)),
-                snmp::TYPE_COUNTER64        => self.read_snmp_counter64().map(|v| Counter64(v)),
+                snmp::TYPE_IPADDRESS        => self.read_snmp_ipaddress().map(IpAddress),
+                snmp::TYPE_COUNTER32        => self.read_snmp_counter32().map(Counter32),
+                snmp::TYPE_UNSIGNED32       => self.read_snmp_unsigned32().map(Unsigned32),
+                snmp::TYPE_TIMETICKS        => self.read_snmp_timeticks().map(Timeticks),
+                snmp::TYPE_OPAQUE           => self.read_snmp_opaque().map(Opaque),
+                snmp::TYPE_COUNTER64        => self.read_snmp_counter64().map(Counter64),
                 snmp::MSG_GET               => self.read_raw(ident).map(|v| SnmpGetRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_GET_NEXT          => self.read_raw(ident).map(|v| SnmpGetNextRequest(AsnReader::from_bytes(v))),
                 snmp::MSG_GET_BULK          => self.read_raw(ident).map(|v| SnmpGetBulkRequest(AsnReader::from_bytes(v))),
