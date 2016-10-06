@@ -72,8 +72,6 @@
 //! }
 //! ```
 
-//#![cfg_attr(all(test, feature = "private-tests"), feature(test))]
-
 use std::fmt;
 use std::io;
 use std::mem;
@@ -82,7 +80,6 @@ use std::num::Wrapping;
 use std::ptr;
 use std::time::Duration;
 
-// I have some private devices and data I test against that are not suitable for publication.
 #[cfg(test)]
 mod tests;
 
