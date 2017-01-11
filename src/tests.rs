@@ -41,18 +41,18 @@ fn asn_parse_getnext_pdu() {
                 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00, 0x05, 0x00];
     let mut reader = AsnReader::from_bytes(&pdu[..]);
     reader.read_asn_sequence(|rdr| {
-        let version = try!(rdr.read_asn_integer());
+        let version = rdr.read_asn_integer()?;
         assert_eq!(version, snmp::VERSION_2 as i64);
-        let community = try!(rdr.read_asn_octetstring());
+        let community = rdr.read_asn_octetstring()?;
         assert_eq!(community, b"tyS0n43d");
         println!("version: {}", version);
-        let msg_ident = try!(rdr.peek_byte());
+        let msg_ident = rdr.peek_byte()?;
         println!("msg_ident: {}", msg_ident);
         assert_eq!(msg_ident, snmp::MSG_GET_NEXT);
         rdr.read_constructed(msg_ident, |rdr| {
-            let req_id = try!(rdr.read_asn_integer());
-            let error_status = try!(rdr.read_asn_integer());
-            let error_index = try!(rdr.read_asn_integer());
+            let req_id = rdr.read_asn_integer()?;
+            let error_status = rdr.read_asn_integer()?;
+            let error_index = rdr.read_asn_integer()?;
             println!("req_id: {}, error_status: {}, error_index: {}",
                      req_id, error_status, error_index);
             assert_eq!(req_id, 1251699618);
@@ -60,7 +60,7 @@ fn asn_parse_getnext_pdu() {
             assert_eq!(error_index, 0);
             rdr.read_asn_sequence(|rdr| {
                 rdr.read_asn_sequence(|rdr| {
-                    let name = try!(rdr.read_asn_objectidentifier());
+                    let name = rdr.read_asn_objectidentifier()?;
                     let expected = [1, 3, 6, 1, 2, 1, 1, 1, 0];
                     println!("name: {}", name);
                     assert_eq!(name, &expected[..]);
