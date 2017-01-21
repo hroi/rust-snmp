@@ -72,6 +72,8 @@
 //! }
 //! ```
 
+#![allow(unknown_lints, doc_markdown)]
+
 use std::fmt;
 use std::io;
 use std::mem;
@@ -106,7 +108,7 @@ type SnmpResult<T> = Result<T, SnmpError>;
 const BUFFER_SIZE: usize = 4096;
 
 mod asn1 {
-    #![allow(dead_code)]
+    #![allow(dead_code, identity_op, eq_op)]
 
     pub const PRIMITIVE:             u8 = 0b00000000;
     pub const CONSTRUCTED:           u8 = 0b00100000;
@@ -126,7 +128,7 @@ mod asn1 {
 }
 
 mod snmp {
-    #![allow(dead_code)]
+    #![allow(dead_code, identity_op, eq_op)]
 
     use super::asn1;
 
