@@ -1107,6 +1107,18 @@ impl SyncSession {
         Ok(resp)
     }
 
+    /// # Panics if any of the values are not one of these supported types:
+    ///   - `Boolean`
+    ///   - `Null`
+    ///   - `Integer`
+    ///   - `OctetString`
+    ///   - `ObjectIdentifier`
+    ///   - `IpAddress`
+    ///   - `Counter32`
+    ///   - `Unsigned32`
+    ///   - `Timeticks`
+    ///   - `Opaque`
+    ///   - `Counter64`
     pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu);

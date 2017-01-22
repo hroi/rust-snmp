@@ -6,6 +6,7 @@ Suppports:
 - GET
 - GETNEXT
 - GETBULK
+- SET
 - Basic SNMPv2 types
 - Synchronous requests
 - UDP transport
