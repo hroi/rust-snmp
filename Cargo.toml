@@ -10,7 +10,3 @@ readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
 exclude = ["src/private"]
 
-[dependencies]
-
-[features]
-private-tests = []
