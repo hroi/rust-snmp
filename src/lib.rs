@@ -78,7 +78,7 @@
 //! use snmp::{SyncSession, Value};
 //!
 //! let syscontact_oid  = &[1,3,6,1,2,1,1,4,0];
-//! let contact = Value::OctetString(b"Thomas A. Anderson");
+//! let contact         = Value::OctetString(b"Thomas A. Anderson");
 //! let agent_addr      = "[2001:db8:f00:b413::abc]:161";
 //! let community       = b"f00b4r";
 //! let timeout         = Duration::from_secs(2);
@@ -1023,7 +1023,6 @@ impl<'a> Iterator for AsnReader<'a> {
                 _ =>                          Err(SnmpError::AsnUnsupportedType),
             };
             ret.ok()
-            //Some(ret)
         } else {
             None
         }
