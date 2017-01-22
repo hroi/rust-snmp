@@ -108,7 +108,7 @@ type SnmpResult<T> = Result<T, SnmpError>;
 
 const BUFFER_SIZE: usize = 4096;
 
-mod asn1 {
+pub mod asn1 {
     #![allow(dead_code, identity_op, eq_op)]
 
     pub const PRIMITIVE:             u8 = 0b00000000;
@@ -128,7 +128,7 @@ mod asn1 {
     pub const TYPE_SET:              u8 = CLASS_UNIVERSAL | CONSTRUCTED | 17;
 }
 
-mod snmp {
+pub mod snmp {
     #![allow(dead_code, identity_op, eq_op)]
 
     use super::asn1;
@@ -151,9 +151,29 @@ mod snmp {
     pub const TYPE_TIMETICKS:  u8 = asn1::CLASS_APPLICATION | 3;
     pub const TYPE_OPAQUE:     u8 = asn1::CLASS_APPLICATION | 4;
     pub const TYPE_COUNTER64:  u8 = asn1::CLASS_APPLICATION | 6;
+
+    pub const ERRSTATUS_NOERROR:             u32 =  0;
+    pub const ERRSTATUS_TOOBIG:              u32 =  1;
+    pub const ERRSTATUS_NOSUCHNAME:          u32 =  2;
+    pub const ERRSTATUS_BADVALUE:            u32 =  3;
+    pub const ERRSTATUS_READONLY:            u32 =  4;
+    pub const ERRSTATUS_GENERR:              u32 =  5;
+    pub const ERRSTATUS_NOACCESS:            u32 =  6;
+    pub const ERRSTATUS_WRONGTYPE:           u32 =  7;
+    pub const ERRSTATUS_WRONGLENGTH:         u32 =  8;
+    pub const ERRSTATUS_WRONGENCODING:       u32 =  9;
+    pub const ERRSTATUS_WRONGVALUE:          u32 = 10;
+    pub const ERRSTATUS_NOCREATION:          u32 = 11;
+    pub const ERRSTATUS_INCONSISTENTVALUE:   u32 = 12;
+    pub const ERRSTATUS_RESOURCEUNAVAILABLE: u32 = 13;
+    pub const ERRSTATUS_COMMITFAILED:        u32 = 14;
+    pub const ERRSTATUS_UNDOFAILED:          u32 = 15;
+    pub const ERRSTATUS_AUTHORIZATIONERROR:  u32 = 16;
+    pub const ERRSTATUS_NOTWRITABLE:         u32 = 17;
+    pub const ERRSTATUS_INCONSISTENTNAME:    u32 = 18;
 }
 
-mod pdu {
+pub mod pdu {
     use super::{BUFFER_SIZE, asn1, snmp, Value};
     use std::{fmt, mem, ops, ptr};
 
@@ -262,6 +282,36 @@ mod pdu {
             self.push_byte(asn1::TYPE_INTEGER);
         }
 
+        fn push_counter32(&mut self, n: u32) {
+            let len = self.push_i64(n as i64);
+            self.push_length(len);
+            self.push_byte(snmp::TYPE_COUNTER32);
+        }
+
+        fn push_unsigned32(&mut self, n: u32) {
+            let len = self.push_i64(n as i64);
+            self.push_length(len);
+            self.push_byte(snmp::TYPE_UNSIGNED32);
+        }
+
+        fn push_timeticks(&mut self, n: u32) {
+            let len = self.push_i64(n as i64);
+            self.push_length(len);
+            self.push_byte(snmp::TYPE_TIMETICKS);
+        }
+
+        fn push_opaque(&mut self, bytes: &[u8]) {
+            self.push_chunk(bytes);
+            self.push_length(bytes.len());
+            self.push_byte(snmp::TYPE_OPAQUE);
+        }
+
+        fn push_counter64(&mut self, n: u64) {
+            let len = self.push_i64(n as i64);
+            self.push_length(len);
+            self.push_byte(snmp::TYPE_COUNTER64);
+        }
+
         fn push_i64(&mut self, mut n: i64) -> usize {
             let (null, num_null_bytes) = if !n.is_negative() {
                 (0x00u8, (n.leading_zeros() / 8) as usize)
@@ -304,13 +354,19 @@ mod pdu {
         }
 
         fn push_ipaddress(&mut self, ip: &[u8; 4]) {
-            self.push_chunk(&ip[..]);
+            self.push_chunk(ip);
             self.push_length(ip.len());
             self.push_byte(snmp::TYPE_IPADDRESS);
         }
 
         fn push_null(&mut self) {
             self.push_chunk(&[asn1::TYPE_NULL, 0]);
+        }
+
+        fn push_object_identifier_raw(&mut self, input: &[u8]) {
+            self.push_chunk(input);
+            self.push_length(input.len());
+            self.push_byte(asn1::TYPE_OBJECTIDENTIFIER);
         }
 
         fn push_object_identifier(&mut self, input: &[u32]) {
@@ -429,15 +485,17 @@ mod pdu {
                     for &(ref name, ref val) in values.iter().rev() {
                         buf.push_sequence(|buf| {
                             match *val {
-                                Value::ObjectIdentifier(ref objid) => {
-                                    let mut oidbuf: super::ObjIdBuf = [0; 128];
-                                    let oid = objid.read_name(&mut oidbuf).expect("objid.read_name failed");
-                                    buf.push_object_identifier(oid);
-                                },
-                                Value::Boolean(b) => buf.push_boolean(b),
-                                Value::Integer(i) => buf.push_integer(i),
-                                Value::IpAddress(ref ip) => buf.push_ipaddress(ip),
-                                Value::OctetString(ostr) => buf.push_octet_string(ostr),
+                                Value::Boolean(b)                  => buf.push_boolean(b),
+                                Value::Null                        => buf.push_null(),
+                                Value::Integer(i)                  => buf.push_integer(i),
+                                Value::OctetString(ostr)           => buf.push_octet_string(ostr),
+                                Value::ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
+                                Value::IpAddress(ref ip)           => buf.push_ipaddress(ip),
+                                Value::Counter32(i)                => buf.push_counter32(i),
+                                Value::Unsigned32(i)               => buf.push_unsigned32(i),
+                                Value::Timeticks(tt)               => buf.push_timeticks(tt),
+                                Value::Opaque(bytes)               => buf.push_opaque(bytes),
+                                Value::Counter64(i)                => buf.push_counter64(i),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -488,18 +546,19 @@ impl<'a> fmt::Display for ObjectIdentifier<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
         let mut first = true;
-        if let Ok(name) = self.read_name(&mut buf) {
-            for subid in name {
-                if first {
-                    first = false;
-                    f.write_fmt(format_args!("{}", subid))?;
-                } else {
-                    f.write_fmt(format_args!(".{}", subid))?;
+        match self.read_name(&mut buf) {
+            Ok(name) => {
+                for subid in name {
+                    if first {
+                        first = false;
+                        f.write_fmt(format_args!("{}", subid))?;
+                    } else {
+                        f.write_fmt(format_args!(".{}", subid))?;
+                    }
                 }
+                Ok(())
             }
-            Ok(())
-        } else {
-            f.write_str("Invalid OID")
+            Err(err) => f.write_fmt(format_args!("Invalid OID: {:?}", err))
         }
     }
 }
@@ -543,21 +602,15 @@ impl<'a> ObjectIdentifier<'a> {
         let mut pos = 2;
         let mut cur_oid: u32 = 0;
         let mut is_done = false;
-        let mut num_bytes_in_int = 0;
         for b in &input[1..] {
             if pos == output.len() {
                 return Err(SnmpError::AsnEof);
             }
-            num_bytes_in_int += 1;
-            if num_bytes_in_int > mem::size_of::<u32>() {
-                return Err(SnmpError::AsnIntOverflow);
-            }
             is_done = b & 0b10000000 == 0;
             let val = b & 0b01111111;
-            cur_oid <<= 7;
+            cur_oid = cur_oid.checked_shl(7).ok_or(SnmpError::AsnIntOverflow)?;
             cur_oid |= val as u32;
             if is_done {
-                num_bytes_in_int = 0;
                 output[pos] = cur_oid;
                 pos += 1;
                 cur_oid = 0;
@@ -568,6 +621,10 @@ impl<'a> ObjectIdentifier<'a> {
         } else {
             Ok(&output[..pos])
         }
+    }
+
+    pub fn raw(&self) -> &'a [u8] {
+        self.inner
     }
 }
 
@@ -602,11 +659,11 @@ impl<'a> fmt::Debug for AsnReader<'a> {
 
 impl<'a> AsnReader<'a> {
 
-    fn from_bytes(bytes: &[u8]) -> AsnReader {
+    pub fn from_bytes(bytes: &[u8]) -> AsnReader {
         AsnReader {inner: bytes}
     }
 
-    fn peek_byte(&mut self) -> SnmpResult<u8> {
+    pub fn peek_byte(&mut self) -> SnmpResult<u8> {
         if self.inner.is_empty() {
             Err(SnmpError::AsnEof)
         } else {
@@ -614,7 +671,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    fn read_byte(&mut self) -> SnmpResult<u8> {
+    pub fn read_byte(&mut self) -> SnmpResult<u8> {
         match self.inner.split_first() {
             Some((head, tail)) => {
                 self.inner = tail;
@@ -624,7 +681,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    fn read_length(&mut self) -> SnmpResult<usize> {
+    pub fn read_length(&mut self) -> SnmpResult<usize> {
         if let Some((head, tail)) = self.inner.split_first() {
             let o: usize;
             if head < &128 {
@@ -655,7 +712,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    fn read_i64_type(&mut self, expected_ident: u8) -> SnmpResult<i64> {
+    pub fn read_i64_type(&mut self, expected_ident: u8) -> SnmpResult<i64> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
             return Err(SnmpError::AsnWrongType);
@@ -669,7 +726,7 @@ impl<'a> AsnReader<'a> {
         decode_i64(val)
     }
 
-    fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<&'a [u8]> {
+    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<&'a [u8]> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
             return Err(SnmpError::AsnWrongType);
@@ -683,7 +740,7 @@ impl<'a> AsnReader<'a> {
         Ok(val)
     }
 
-    fn read_constructed<F>(&mut self, expected_ident: u8, f: F) -> SnmpResult<()>
+    pub fn read_constructed<F>(&mut self, expected_ident: u8, f: F) -> SnmpResult<()>
         where F: Fn(&mut AsnReader) -> SnmpResult<()>
     {
         let ident = self.read_byte()?;
@@ -704,7 +761,7 @@ impl<'a> AsnReader<'a> {
     // ASN
     //
 
-    fn read_asn_boolean(&mut self) -> SnmpResult<bool> {
+    pub fn read_asn_boolean(&mut self) -> SnmpResult<bool> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_NULL {
             return Err(SnmpError::AsnWrongType);
@@ -720,15 +777,15 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    fn read_asn_integer(&mut self) -> SnmpResult<i64> {
+    pub fn read_asn_integer(&mut self) -> SnmpResult<i64> {
         self.read_i64_type(asn1::TYPE_INTEGER)
     }
 
-    fn read_asn_octetstring(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_asn_octetstring(&mut self) -> SnmpResult<&'a [u8]> {
         self.read_raw(asn1::TYPE_OCTETSTRING)
     }
 
-    fn read_asn_null(&mut self) -> SnmpResult<()> {
+    pub fn read_asn_null(&mut self) -> SnmpResult<()> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_NULL {
             return Err(SnmpError::AsnWrongType);
@@ -741,7 +798,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    fn read_asn_objectidentifier(&mut self) -> SnmpResult<ObjectIdentifier<'a>> {
+    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<ObjectIdentifier<'a>> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_OBJECTIDENTIFIER {
             return Err(SnmpError::AsnWrongType);
@@ -772,27 +829,27 @@ impl<'a> AsnReader<'a> {
     // SNMP
     //
 
-    fn read_snmp_counter32(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_counter32(&mut self) -> SnmpResult<u32> {
         self.read_i64_type(snmp::TYPE_COUNTER32).map(|v| v as u32)
     }
 
-    fn read_snmp_unsigned32(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_unsigned32(&mut self) -> SnmpResult<u32> {
         self.read_i64_type(snmp::TYPE_UNSIGNED32).map(|v| v as u32)
     }
 
-    fn read_snmp_timeticks(&mut self) -> SnmpResult<u32> {
+    pub fn read_snmp_timeticks(&mut self) -> SnmpResult<u32> {
         self.read_i64_type(snmp::TYPE_TIMETICKS).map(|v| v as u32)
     }
 
-    fn read_snmp_counter64(&mut self) -> SnmpResult<u64> {
+    pub fn read_snmp_counter64(&mut self) -> SnmpResult<u64> {
         self.read_i64_type(snmp::TYPE_COUNTER64).map(|v| v as u64)
     }
 
-    fn read_snmp_opaque(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_snmp_opaque(&mut self) -> SnmpResult<&'a [u8]> {
         self.read_raw(snmp::TYPE_OPAQUE)
     }
 
-    fn read_snmp_ipaddress(&mut self) -> SnmpResult<[u8; 4]> {
+    pub fn read_snmp_ipaddress(&mut self) -> SnmpResult<[u8; 4]> {
         //let mut ip = [0u8; 4];
         let val = self.read_raw(snmp::TYPE_IPADDRESS)?;
         if val.len() != 4 {
