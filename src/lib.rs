@@ -504,18 +504,19 @@ pub mod pdu {
                 buf.push_sequence(|buf| {
                     for &(ref name, ref val) in values.iter().rev() {
                         buf.push_sequence(|buf| {
+                            use Value::*;
                             match *val {
-                                Value::Boolean(b)                  => buf.push_boolean(b),
-                                Value::Null                        => buf.push_null(),
-                                Value::Integer(i)                  => buf.push_integer(i),
-                                Value::OctetString(ostr)           => buf.push_octet_string(ostr),
-                                Value::ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
-                                Value::IpAddress(ref ip)           => buf.push_ipaddress(ip),
-                                Value::Counter32(i)                => buf.push_counter32(i),
-                                Value::Unsigned32(i)               => buf.push_unsigned32(i),
-                                Value::Timeticks(tt)               => buf.push_timeticks(tt),
-                                Value::Opaque(bytes)               => buf.push_opaque(bytes),
-                                Value::Counter64(i)                => buf.push_counter64(i),
+                                Boolean(b)                  => buf.push_boolean(b),
+                                Null                        => buf.push_null(),
+                                Integer(i)                  => buf.push_integer(i),
+                                OctetString(ostr)           => buf.push_octet_string(ostr),
+                                ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
+                                IpAddress(ref ip)           => buf.push_ipaddress(ip),
+                                Counter32(i)                => buf.push_counter32(i),
+                                Unsigned32(i)               => buf.push_unsigned32(i),
+                                Timeticks(tt)               => buf.push_timeticks(tt),
+                                Opaque(bytes)               => buf.push_opaque(bytes),
+                                Counter64(i)                => buf.push_counter64(i),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
