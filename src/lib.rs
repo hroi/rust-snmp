@@ -72,6 +72,7 @@
 //! }
 //! ```
 
+#![cfg_attr(feature = "private-tests", feature(test))]
 #![allow(unknown_lints, doc_markdown)]
 
 use std::fmt;
@@ -153,7 +154,7 @@ mod snmp {
 }
 
 mod pdu {
-    use super::{BUFFER_SIZE, asn1, snmp};
+    use super::{BUFFER_SIZE, asn1, snmp, Value};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -292,6 +293,22 @@ mod pdu {
             count
         }
 
+        fn push_boolean(&mut self, boolean: bool) {
+            if boolean == true {
+                self.push_byte(0x1);
+            }  else {
+                self.push_byte(0x0);
+            }
+            self.push_length(1);
+            self.push_byte(asn1::TYPE_BOOLEAN);
+        }
+
+        fn push_ipaddress(&mut self, ip: &[u8; 4]) {
+            self.push_chunk(&ip[..]);
+            self.push_length(ip.len());
+            self.push_byte(snmp::TYPE_IPADDRESS);
+        }
+
         fn push_null(&mut self) {
             self.push_chunk(&[asn1::TYPE_NULL, 0]);
         }
@@ -397,6 +414,38 @@ mod pdu {
                 });
                 buf.push_integer(max_repetitions as i64);
                 buf.push_integer(non_repeaters as i64);
+                buf.push_integer(req_id as i64);
+            });
+            buf.push_octet_string(community);
+            buf.push_integer(snmp::VERSION_2 as i64);
+        });
+    }
+
+    pub fn build_set(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(snmp::MSG_SET, |buf| {
+                buf.push_sequence(|buf| {
+                    for &(ref name, ref val) in values.iter().rev() {
+                        buf.push_sequence(|buf| {
+                            match *val {
+                                Value::ObjectIdentifier(ref objid) => {
+                                    let mut oidbuf: super::ObjIdBuf = [0; 128];
+                                    let oid = objid.read_name(&mut oidbuf).expect("objid.read_name failed");
+                                    buf.push_object_identifier(oid);
+                                },
+                                Value::Boolean(b) => buf.push_boolean(b),
+                                Value::Integer(i) => buf.push_integer(i),
+                                Value::IpAddress(ref ip) => buf.push_ipaddress(ip),
+                                Value::OctetString(ostr) => buf.push_octet_string(ostr),
+                                _ => unimplemented!(),
+                            }
+                            buf.push_object_identifier(name); // name
+                        });
+                    }
+                });
+                buf.push_integer(0);
+                buf.push_integer(0);
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
@@ -985,6 +1034,25 @@ impl SyncSession {
     pub fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_getbulk(self.community.as_slice(), req_id, names, non_repeaters, max_repetitions, &mut self.send_pdu);
+        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
+        self.req_id += Wrapping(1);
+        let pdu_bytes = &self.recv_buf[..recv_len];
+        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
+        if resp.message_type != SnmpMessageType::Response {
+            return Err(SnmpError::AsnWrongType);
+        }
+        if resp.req_id != req_id {
+            return Err(SnmpError::RequestIdMismatch);
+        }
+        if resp.community != &self.community[..] {
+            return Err(SnmpError::CommunityMismatch);
+        }
+        Ok(resp)
+    }
+
+    pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+        let req_id = self.req_id.0;
+        pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu);
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
