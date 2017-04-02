@@ -724,8 +724,6 @@ impl<'a> AsnReader<'a> {
                 bytes[(mem::size_of::<usize>() - length_len)..]
                     .copy_from_slice(&tail[..length_len]);
 
-                let len_ = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
-
                 o = unsafe { mem::transmute::<[u8; 8], i64>(bytes)} as usize;
                 self.inner = &tail[length_len as usize..];
                 Ok(o)
