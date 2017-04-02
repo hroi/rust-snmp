@@ -287,7 +287,7 @@ pub mod pdu {
                 let leading_byte = length_len as u8 | 0b1000_0000;
                 self.scribble_bytes(|o| {
                     assert!(o.len() >= length_len + 1);
-                    let bytes = unsafe { mem::transmute::<usize, [u8; 4]>(len.to_be()) };
+                    let bytes = unsafe { mem::transmute::<u64, [u8; 8]>(len.to_be() as u64) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
                     o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
@@ -537,16 +537,16 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
     if i.len() > mem::size_of::<i64>() {
         return Err(SnmpError::AsnIntOverflow);
     }
-    let mut bytes = [0u8; 4];
+    let mut bytes = [0u8; 8];
     bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
 
-    let mut ret = unsafe { mem::transmute::<[u8; 4], i32>(bytes).to_be()};
+    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes)};
     {
         //sign extend
         let shift_amount = (mem::size_of::<i64>() - i.len()) * 8;
         ret = (ret << shift_amount) >> shift_amount;
     }
-    Ok(ret as i64)
+    Ok(ret)
 }
 
 /// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
@@ -720,11 +720,13 @@ impl<'a> AsnReader<'a> {
                     return Err(SnmpError::AsnInvalidLen);
                 }
 
-                let mut bytes = [0u8; 4];
+                let mut bytes = [0u8; 8];
                 bytes[(mem::size_of::<usize>() - length_len)..]
                     .copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; 4], usize>(bytes).to_be()};
+                let len_ = [0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8];
+
+                o = unsafe { mem::transmute::<[u8; 8], i64>(bytes)} as usize;
                 self.inner = &tail[length_len as usize..];
                 Ok(o)
             }
