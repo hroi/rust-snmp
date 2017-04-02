@@ -540,7 +540,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
     let mut bytes = [0u8; 8];
     bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
 
-    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes)};
+    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be()};
     {
         //sign extend
         let shift_amount = (mem::size_of::<i64>() - i.len()) * 8;
