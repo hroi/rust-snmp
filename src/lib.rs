@@ -287,7 +287,7 @@ pub mod pdu {
                 let leading_byte = length_len as u8 | 0b1000_0000;
                 self.scribble_bytes(|o| {
                     assert!(o.len() >= length_len + 1);
-                    let bytes = unsafe { mem::transmute::<usize, [u8; 8]>(len.to_be()) };
+                    let bytes = unsafe { mem::transmute::<u64, [u8; 8]>(len.to_be() as u64) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
                     o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
@@ -724,7 +724,7 @@ impl<'a> AsnReader<'a> {
                 bytes[(mem::size_of::<usize>() - length_len)..]
                     .copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; 8], usize>(bytes).to_be()};
+                o = unsafe { mem::transmute::<[u8; 8], i64>(bytes)} as usize;
                 self.inner = &tail[length_len as usize..];
                 Ok(o)
             }
