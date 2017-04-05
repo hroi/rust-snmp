@@ -103,6 +103,11 @@ use std::num::Wrapping;
 use std::ptr;
 use std::time::Duration;
 
+#[cfg(target_pointer_width="32")]
+const USIZE_LEN: usize = 4;
+#[cfg(target_pointer_width="64")]
+const USIZE_LEN: usize = 8;
+
 #[cfg(test)]
 mod tests;
 
@@ -194,7 +199,7 @@ pub mod snmp {
 }
 
 pub mod pdu {
-    use super::{BUFFER_SIZE, asn1, snmp, Value};
+    use super::{BUFFER_SIZE, USIZE_LEN, asn1, snmp, Value};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -287,7 +292,7 @@ pub mod pdu {
                 let leading_byte = length_len as u8 | 0b1000_0000;
                 self.scribble_bytes(|o| {
                     assert!(o.len() >= length_len + 1);
-                    let bytes = unsafe { mem::transmute::<usize, [u8; 8]>(len.to_be()) };
+                    let bytes = unsafe { mem::transmute::<usize, [u8; USIZE_LEN]>(len.to_be()) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
                     o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
@@ -720,11 +725,11 @@ impl<'a> AsnReader<'a> {
                     return Err(SnmpError::AsnInvalidLen);
                 }
 
-                let mut bytes = [0u8; 8];
-                bytes[(mem::size_of::<usize>() - length_len)..]
+                let mut bytes = [0u8; USIZE_LEN];
+                bytes[(USIZE_LEN - length_len)..]
                     .copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; 8], usize>(bytes).to_be()};
+                o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be()};
                 self.inner = &tail[length_len as usize..];
                 Ok(o)
             }
