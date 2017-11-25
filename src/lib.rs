@@ -536,6 +536,41 @@ pub mod pdu {
             buf.push_integer(snmp::VERSION_2 as i64);
         });
     }
+
+    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
+                buf.push_sequence(|buf| {
+                    for &(ref name, ref val) in values.iter().rev() {
+                        buf.push_sequence(|buf| {
+                            use Value::*;
+                            match *val {
+                                Boolean(b)                  => buf.push_boolean(b),
+                                Null                        => buf.push_null(),
+                                Integer(i)                  => buf.push_integer(i),
+                                OctetString(ostr)           => buf.push_octet_string(ostr),
+                                ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
+                                IpAddress(ref ip)           => buf.push_ipaddress(ip),
+                                Counter32(i)                => buf.push_counter32(i),
+                                Unsigned32(i)               => buf.push_unsigned32(i),
+                                Timeticks(tt)               => buf.push_timeticks(tt),
+                                Opaque(bytes)               => buf.push_opaque(bytes),
+                                Counter64(i)                => buf.push_counter64(i),
+                                _ => unimplemented!(),
+                            }
+                            buf.push_object_identifier(name); // name
+                        });
+                    }
+                });
+                buf.push_integer(0);
+                buf.push_integer(0);
+                buf.push_integer(req_id as i64);
+            });
+            buf.push_octet_string(community);
+            buf.push_integer(snmp::VERSION_2 as i64);
+        });
+    }
 }
 
 fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
