@@ -177,6 +177,10 @@ pub mod snmp {
     pub const TYPE_OPAQUE:     u8 = asn1::CLASS_APPLICATION | 4;
     pub const TYPE_COUNTER64:  u8 = asn1::CLASS_APPLICATION | 6;
 
+    pub const SNMP_NOSUCHOBJECT:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
+    pub const SNMP_NOSUCHINSTANCE: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1); /* 81=129 */
+    pub const SNMP_ENDOFMIBVIEW:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
+
     pub const ERRSTATUS_NOERROR:             u32 =  0;
     pub const ERRSTATUS_TOOBIG:              u32 =  1;
     pub const ERRSTATUS_NOSUCHNAME:          u32 =  2;
@@ -305,6 +309,10 @@ pub mod pdu {
             let len = self.push_i64(n);
             self.push_length(len);
             self.push_byte(asn1::TYPE_INTEGER);
+        }
+
+        fn push_endofmibview(&mut self) {
+            self.push_chunk(&[snmp::SNMP_ENDOFMIBVIEW, 0]);
         }
 
         fn push_counter32(&mut self, n: u32) {
@@ -557,6 +565,7 @@ pub mod pdu {
                                 Timeticks(tt)               => buf.push_timeticks(tt),
                                 Opaque(bytes)               => buf.push_opaque(bytes),
                                 Counter64(i)                => buf.push_counter64(i),
+                                EndOfMibView                => buf.push_endofmibview(),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -989,6 +998,8 @@ pub enum Value<'a> {
     Opaque(&'a [u8]),
     Counter64(u64),
 
+    EndOfMibView,
+
     SnmpGetRequest(AsnReader<'a>),
     SnmpGetNextRequest(AsnReader<'a>),
     SnmpGetBulkRequest(AsnReader<'a>),
@@ -1018,6 +1029,8 @@ impl<'a> fmt::Debug for Value<'a> {
             Timeticks(val)               => write!(f, "TIMETICKS: {}", val),
             Opaque(val)                  => write!(f, "OPAQUE: {:?}", val),
             Counter64(val)               => write!(f, "COUNTER64: {}", val),
+
+            EndOfMibView                 => write!(f, "END OF MIB VIEW"),
 
             SnmpGetRequest(ref val)      => write!(f, "SNMP GET REQUEST: {:#?}", val),
             SnmpGetNextRequest(ref val)  => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
