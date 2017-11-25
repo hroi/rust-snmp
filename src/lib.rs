@@ -315,6 +315,14 @@ pub mod pdu {
             self.push_chunk(&[snmp::SNMP_ENDOFMIBVIEW, 0]);
         }
 
+        fn push_nosuchobject(&mut self) {
+            self.push_chunk(&[snmp::SNMP_NOSUCHOBJECT, 0]);
+        }
+
+        fn push_nosuchinstance(&mut self) {
+            self.push_chunk(&[snmp::SNMP_NOSUCHINSTANCE, 0]);
+        }
+
         fn push_counter32(&mut self, n: u32) {
             let len = self.push_i64(n as i64);
             self.push_length(len);
@@ -566,6 +574,8 @@ pub mod pdu {
                                 Opaque(bytes)               => buf.push_opaque(bytes),
                                 Counter64(i)                => buf.push_counter64(i),
                                 EndOfMibView                => buf.push_endofmibview(),
+                                NoSuchObject                => buf.push_nosuchobject(),
+                                NoSuchInstance              => buf.push_nosuchinstance(),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -999,6 +1009,8 @@ pub enum Value<'a> {
     Counter64(u64),
 
     EndOfMibView,
+    NoSuchObject,
+    NoSuchInstance,
 
     SnmpGetRequest(AsnReader<'a>),
     SnmpGetNextRequest(AsnReader<'a>),
@@ -1031,6 +1043,8 @@ impl<'a> fmt::Debug for Value<'a> {
             Counter64(val)               => write!(f, "COUNTER64: {}", val),
 
             EndOfMibView                 => write!(f, "END OF MIB VIEW"),
+            NoSuchObject                 => write!(f, "NO SUCH OBJECT"),
+            NoSuchInstance               => write!(f, "NO SUCH INSTANCE"),
 
             SnmpGetRequest(ref val)      => write!(f, "SNMP GET REQUEST: {:#?}", val),
             SnmpGetNextRequest(ref val)  => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
