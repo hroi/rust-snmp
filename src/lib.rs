@@ -553,7 +553,7 @@ pub mod pdu {
         });
     }
 
-    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], &Value)], buf: &mut Buf) {
+    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
@@ -561,7 +561,7 @@ pub mod pdu {
                     for &(ref name, ref val) in values.iter().rev() {
                         buf.push_sequence(|buf| {
                             use Value::*;
-                            match **val {
+                            match *val {
                                 Boolean(b)                  => buf.push_boolean(b),
                                 Null                        => buf.push_null(),
                                 Integer(i)                  => buf.push_integer(i),
