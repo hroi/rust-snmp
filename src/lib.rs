@@ -177,6 +177,10 @@ pub mod snmp {
     pub const TYPE_OPAQUE:     u8 = asn1::CLASS_APPLICATION | 4;
     pub const TYPE_COUNTER64:  u8 = asn1::CLASS_APPLICATION | 6;
 
+    pub const SNMP_NOSUCHOBJECT:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
+    pub const SNMP_NOSUCHINSTANCE: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1); /* 81=129 */
+    pub const SNMP_ENDOFMIBVIEW:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
+
     pub const ERRSTATUS_NOERROR:             u32 =  0;
     pub const ERRSTATUS_TOOBIG:              u32 =  1;
     pub const ERRSTATUS_NOSUCHNAME:          u32 =  2;
@@ -305,6 +309,18 @@ pub mod pdu {
             let len = self.push_i64(n);
             self.push_length(len);
             self.push_byte(asn1::TYPE_INTEGER);
+        }
+
+        fn push_endofmibview(&mut self) {
+            self.push_chunk(&[snmp::SNMP_ENDOFMIBVIEW, 0]);
+        }
+
+        fn push_nosuchobject(&mut self) {
+            self.push_chunk(&[snmp::SNMP_NOSUCHOBJECT, 0]);
+        }
+
+        fn push_nosuchinstance(&mut self) {
+            self.push_chunk(&[snmp::SNMP_NOSUCHINSTANCE, 0]);
         }
 
         fn push_counter32(&mut self, n: u32) {
@@ -522,6 +538,44 @@ pub mod pdu {
                                 Timeticks(tt)               => buf.push_timeticks(tt),
                                 Opaque(bytes)               => buf.push_opaque(bytes),
                                 Counter64(i)                => buf.push_counter64(i),
+                                _ => unimplemented!(),
+                            }
+                            buf.push_object_identifier(name); // name
+                        });
+                    }
+                });
+                buf.push_integer(0);
+                buf.push_integer(0);
+                buf.push_integer(req_id as i64);
+            });
+            buf.push_octet_string(community);
+            buf.push_integer(snmp::VERSION_2 as i64);
+        });
+    }
+
+    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
+                buf.push_sequence(|buf| {
+                    for &(ref name, ref val) in values.iter().rev() {
+                        buf.push_sequence(|buf| {
+                            use Value::*;
+                            match *val {
+                                Boolean(b)                  => buf.push_boolean(b),
+                                Null                        => buf.push_null(),
+                                Integer(i)                  => buf.push_integer(i),
+                                OctetString(ostr)           => buf.push_octet_string(ostr),
+                                ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
+                                IpAddress(ref ip)           => buf.push_ipaddress(ip),
+                                Counter32(i)                => buf.push_counter32(i),
+                                Unsigned32(i)               => buf.push_unsigned32(i),
+                                Timeticks(tt)               => buf.push_timeticks(tt),
+                                Opaque(bytes)               => buf.push_opaque(bytes),
+                                Counter64(i)                => buf.push_counter64(i),
+                                EndOfMibView                => buf.push_endofmibview(),
+                                NoSuchObject                => buf.push_nosuchobject(),
+                                NoSuchInstance              => buf.push_nosuchinstance(),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -954,6 +1008,10 @@ pub enum Value<'a> {
     Opaque(&'a [u8]),
     Counter64(u64),
 
+    EndOfMibView,
+    NoSuchObject,
+    NoSuchInstance,
+
     SnmpGetRequest(AsnReader<'a>),
     SnmpGetNextRequest(AsnReader<'a>),
     SnmpGetBulkRequest(AsnReader<'a>),
@@ -983,6 +1041,10 @@ impl<'a> fmt::Debug for Value<'a> {
             Timeticks(val)               => write!(f, "TIMETICKS: {}", val),
             Opaque(val)                  => write!(f, "OPAQUE: {:?}", val),
             Counter64(val)               => write!(f, "COUNTER64: {}", val),
+
+            EndOfMibView                 => write!(f, "END OF MIB VIEW"),
+            NoSuchObject                 => write!(f, "NO SUCH OBJECT"),
+            NoSuchInstance               => write!(f, "NO SUCH INSTANCE"),
 
             SnmpGetRequest(ref val)      => write!(f, "SNMP GET REQUEST: {:#?}", val),
             SnmpGetNextRequest(ref val)  => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
