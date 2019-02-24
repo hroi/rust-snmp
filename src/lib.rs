@@ -93,23 +93,27 @@
 //! ```
 
 #![cfg_attr(feature = "private-tests", feature(test))]
-#![allow(unknown_lints, doc_markdown)]
+#![allow(unknown_lints, clippy::doc_markdown)]
 
-use std::fmt;
-use std::io;
-use std::mem;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::num::Wrapping;
-use std::ptr;
-use std::time::Duration;
+use std::{fmt, mem, ptr};
 
-#[cfg(target_pointer_width="32")]
+use bytes::Bytes;
+
+#[cfg(target_pointer_width = "32")]
 const USIZE_LEN: usize = 4;
-#[cfg(target_pointer_width="64")]
+#[cfg(target_pointer_width = "64")]
 const USIZE_LEN: usize = 8;
+
+#[cfg(feature = "async")]
+mod r#async;
+mod sync;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(feature = "async")]
+pub use r#async::AsyncSession;
+pub use sync::SyncSession;
 
 #[derive(Debug, PartialEq)]
 pub enum SnmpError {
@@ -125,85 +129,86 @@ pub enum SnmpError {
     CommunityMismatch,
     ValueOutOfRange,
 
+    SocketError,
     SendError,
     ReceiveError,
 }
 
-type SnmpResult<T> = Result<T, SnmpError>;
+pub type SnmpResult<T> = Result<T, SnmpError>;
 
 const BUFFER_SIZE: usize = 4096;
 
 pub mod asn1 {
-    #![allow(dead_code, identity_op, eq_op)]
+    #![allow(dead_code, clippy::identity_op, clippy::eq_op)]
 
-    pub const PRIMITIVE:             u8 = 0b00000000;
-    pub const CONSTRUCTED:           u8 = 0b00100000;
+    pub const PRIMITIVE: u8 = 0b0000_0000;
+    pub const CONSTRUCTED: u8 = 0b0010_0000;
 
-    pub const CLASS_UNIVERSAL:       u8 = 0b00000000;
-    pub const CLASS_APPLICATION:     u8 = 0b01000000;
-    pub const CLASS_CONTEXTSPECIFIC: u8 = 0b10000000;
-    pub const CLASS_PRIVATE:         u8 = 0b11000000;
+    pub const CLASS_UNIVERSAL: u8 = 0b0000_0000;
+    pub const CLASS_APPLICATION: u8 = 0b0100_0000;
+    pub const CLASS_CONTEXTSPECIFIC: u8 = 0b1000_0000;
+    pub const CLASS_PRIVATE: u8 = 0b1100_0000;
 
-    pub const TYPE_BOOLEAN:          u8 = CLASS_UNIVERSAL | PRIMITIVE   |  1;
-    pub const TYPE_INTEGER:          u8 = CLASS_UNIVERSAL | PRIMITIVE   |  2;
-    pub const TYPE_OCTETSTRING:      u8 = CLASS_UNIVERSAL | PRIMITIVE   |  4;
-    pub const TYPE_NULL:             u8 = CLASS_UNIVERSAL | PRIMITIVE   |  5;
-    pub const TYPE_OBJECTIDENTIFIER: u8 = CLASS_UNIVERSAL | PRIMITIVE   |  6;
-    pub const TYPE_SEQUENCE:         u8 = CLASS_UNIVERSAL | CONSTRUCTED | 16;
-    pub const TYPE_SET:              u8 = CLASS_UNIVERSAL | CONSTRUCTED | 17;
+    pub const TYPE_BOOLEAN: u8 = CLASS_UNIVERSAL | PRIMITIVE | 1;
+    pub const TYPE_INTEGER: u8 = CLASS_UNIVERSAL | PRIMITIVE | 2;
+    pub const TYPE_OCTETSTRING: u8 = CLASS_UNIVERSAL | PRIMITIVE | 4;
+    pub const TYPE_NULL: u8 = CLASS_UNIVERSAL | PRIMITIVE | 5;
+    pub const TYPE_OBJECTIDENTIFIER: u8 = CLASS_UNIVERSAL | PRIMITIVE | 6;
+    pub const TYPE_SEQUENCE: u8 = CLASS_UNIVERSAL | CONSTRUCTED | 16;
+    pub const TYPE_SET: u8 = CLASS_UNIVERSAL | CONSTRUCTED | 17;
 }
 
 pub mod snmp {
-    #![allow(dead_code, identity_op, eq_op)]
+    #![allow(dead_code, clippy::identity_op, clippy::eq_op)]
 
     use super::asn1;
 
-    pub const VERSION_2:    i64 = 1;
+    pub const VERSION_2: i64 = 1;
 
-    pub const MSG_GET:      u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 0;
+    pub const MSG_GET: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 0;
     pub const MSG_GET_NEXT: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 1;
     pub const MSG_RESPONSE: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 2;
-    pub const MSG_SET:      u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 3;
+    pub const MSG_SET: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 3;
     pub const MSG_GET_BULK: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 5;
-    pub const MSG_INFORM:   u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 6;
-    pub const MSG_TRAP:     u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 7;
-    pub const MSG_REPORT:   u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 8;
+    pub const MSG_INFORM: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 6;
+    pub const MSG_TRAP: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 7;
+    pub const MSG_REPORT: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 8;
 
-    pub const TYPE_IPADDRESS:  u8 = asn1::CLASS_APPLICATION | 0;
-    pub const TYPE_COUNTER32:  u8 = asn1::CLASS_APPLICATION | 1;
+    pub const TYPE_IPADDRESS: u8 = asn1::CLASS_APPLICATION | 0;
+    pub const TYPE_COUNTER32: u8 = asn1::CLASS_APPLICATION | 1;
     pub const TYPE_UNSIGNED32: u8 = asn1::CLASS_APPLICATION | 2;
-    pub const TYPE_GAUGE32:    u8 = TYPE_UNSIGNED32;
-    pub const TYPE_TIMETICKS:  u8 = asn1::CLASS_APPLICATION | 3;
-    pub const TYPE_OPAQUE:     u8 = asn1::CLASS_APPLICATION | 4;
-    pub const TYPE_COUNTER64:  u8 = asn1::CLASS_APPLICATION | 6;
+    pub const TYPE_GAUGE32: u8 = TYPE_UNSIGNED32;
+    pub const TYPE_TIMETICKS: u8 = asn1::CLASS_APPLICATION | 3;
+    pub const TYPE_OPAQUE: u8 = asn1::CLASS_APPLICATION | 4;
+    pub const TYPE_COUNTER64: u8 = asn1::CLASS_APPLICATION | 6;
 
-    pub const SNMP_NOSUCHOBJECT:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
+    pub const SNMP_NOSUCHOBJECT: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
     pub const SNMP_NOSUCHINSTANCE: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1); /* 81=129 */
-    pub const SNMP_ENDOFMIBVIEW:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
+    pub const SNMP_ENDOFMIBVIEW: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
 
-    pub const ERRSTATUS_NOERROR:             u32 =  0;
-    pub const ERRSTATUS_TOOBIG:              u32 =  1;
-    pub const ERRSTATUS_NOSUCHNAME:          u32 =  2;
-    pub const ERRSTATUS_BADVALUE:            u32 =  3;
-    pub const ERRSTATUS_READONLY:            u32 =  4;
-    pub const ERRSTATUS_GENERR:              u32 =  5;
-    pub const ERRSTATUS_NOACCESS:            u32 =  6;
-    pub const ERRSTATUS_WRONGTYPE:           u32 =  7;
-    pub const ERRSTATUS_WRONGLENGTH:         u32 =  8;
-    pub const ERRSTATUS_WRONGENCODING:       u32 =  9;
-    pub const ERRSTATUS_WRONGVALUE:          u32 = 10;
-    pub const ERRSTATUS_NOCREATION:          u32 = 11;
-    pub const ERRSTATUS_INCONSISTENTVALUE:   u32 = 12;
+    pub const ERRSTATUS_NOERROR: u32 = 0;
+    pub const ERRSTATUS_TOOBIG: u32 = 1;
+    pub const ERRSTATUS_NOSUCHNAME: u32 = 2;
+    pub const ERRSTATUS_BADVALUE: u32 = 3;
+    pub const ERRSTATUS_READONLY: u32 = 4;
+    pub const ERRSTATUS_GENERR: u32 = 5;
+    pub const ERRSTATUS_NOACCESS: u32 = 6;
+    pub const ERRSTATUS_WRONGTYPE: u32 = 7;
+    pub const ERRSTATUS_WRONGLENGTH: u32 = 8;
+    pub const ERRSTATUS_WRONGENCODING: u32 = 9;
+    pub const ERRSTATUS_WRONGVALUE: u32 = 10;
+    pub const ERRSTATUS_NOCREATION: u32 = 11;
+    pub const ERRSTATUS_INCONSISTENTVALUE: u32 = 12;
     pub const ERRSTATUS_RESOURCEUNAVAILABLE: u32 = 13;
-    pub const ERRSTATUS_COMMITFAILED:        u32 = 14;
-    pub const ERRSTATUS_UNDOFAILED:          u32 = 15;
-    pub const ERRSTATUS_AUTHORIZATIONERROR:  u32 = 16;
-    pub const ERRSTATUS_NOTWRITABLE:         u32 = 17;
-    pub const ERRSTATUS_INCONSISTENTNAME:    u32 = 18;
+    pub const ERRSTATUS_COMMITFAILED: u32 = 14;
+    pub const ERRSTATUS_UNDOFAILED: u32 = 15;
+    pub const ERRSTATUS_AUTHORIZATIONERROR: u32 = 16;
+    pub const ERRSTATUS_NOTWRITABLE: u32 = 17;
+    pub const ERRSTATUS_INCONSISTENTNAME: u32 = 18;
 }
 
 pub mod pdu {
-    use super::{BUFFER_SIZE, USIZE_LEN, asn1, snmp, Value};
+    use super::{asn1, snmp, Value, BUFFER_SIZE, USIZE_LEN};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -213,9 +218,7 @@ pub mod pdu {
 
     impl fmt::Debug for Buf {
         fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-            fmt.debug_list()
-                .entries(&self[..])
-                .finish()
+            fmt.debug_list().entries(&self[..]).finish()
         }
     }
 
@@ -236,7 +239,6 @@ pub mod pdu {
     }
 
     impl Buf {
-
         fn available(&mut self) -> &mut [u8] {
             &mut self.buf[..(BUFFER_SIZE - self.len)]
         }
@@ -257,14 +259,16 @@ pub mod pdu {
         }
 
         fn scribble_bytes<F>(&mut self, mut f: F)
-            where F: FnMut(&mut [u8]) -> usize
+        where
+            F: FnMut(&mut [u8]) -> usize,
         {
             let scribbled = f(self.available());
             self.len += scribbled;
         }
 
         fn push_constructed<F>(&mut self, ident: u8, mut f: F)
-            where F: FnMut(&mut Self)
+        where
+            F: FnMut(&mut Self),
         {
             let before_len = self.len;
             f(self);
@@ -274,7 +278,8 @@ pub mod pdu {
         }
 
         fn push_sequence<F>(&mut self, f: F)
-            where F: FnMut(&mut Self)
+        where
+            F: FnMut(&mut Self),
         {
             self.push_constructed(asn1::TYPE_SEQUENCE, f)
         }
@@ -295,7 +300,7 @@ pub mod pdu {
                 let length_len = mem::size_of::<usize>() - num_leading_nulls;
                 let leading_byte = length_len as u8 | 0b1000_0000;
                 self.scribble_bytes(|o| {
-                    assert!(o.len() >= length_len + 1);
+                    assert!(o.len() > length_len);
                     let bytes = unsafe { mem::transmute::<usize, [u8; USIZE_LEN]>(len.to_be()) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
@@ -324,19 +329,19 @@ pub mod pdu {
         }
 
         fn push_counter32(&mut self, n: u32) {
-            let len = self.push_i64(n as i64);
+            let len = self.push_i64(i64::from(n));
             self.push_length(len);
             self.push_byte(snmp::TYPE_COUNTER32);
         }
 
         fn push_unsigned32(&mut self, n: u32) {
-            let len = self.push_i64(n as i64);
+            let len = self.push_i64(i64::from(n));
             self.push_length(len);
             self.push_byte(snmp::TYPE_UNSIGNED32);
         }
 
         fn push_timeticks(&mut self, n: u32) {
-            let len = self.push_i64(n as i64);
+            let len = self.push_i64(i64::from(n));
             self.push_length(len);
             self.push_byte(snmp::TYPE_TIMETICKS);
         }
@@ -361,16 +366,15 @@ pub mod pdu {
             };
             n = n.to_be();
             let count = unsafe {
-                let mut wbuf = self.available();
+                let wbuf = self.available();
                 let mut src_ptr = &n as *const i64 as *const u8;
-                let mut dst_ptr = wbuf.as_mut_ptr()
-                    .offset((wbuf.len() - mem::size_of::<i64>()) as isize);
+                let mut dst_ptr = wbuf.as_mut_ptr().add(wbuf.len() - mem::size_of::<i64>());
                 let mut count = mem::size_of::<i64>() - num_null_bytes;
                 if count == 0 {
                     count = 1;
                 }
                 // preserve sign
-                if (*(src_ptr.offset((mem::size_of::<i64>() - count) as isize)) ^ null) > 127u8 {
+                if (*(src_ptr.add(mem::size_of::<i64>() - count)) ^ null) > 127u8 {
                     count += 1;
                 }
                 assert!(wbuf.len() >= count);
@@ -385,17 +389,13 @@ pub mod pdu {
         }
 
         fn push_boolean(&mut self, boolean: bool) {
-            if boolean == true {
-                self.push_byte(0x1);
-            }  else {
-                self.push_byte(0x0);
-            }
+            self.push_byte(boolean as u8);
             self.push_length(1);
             self.push_byte(asn1::TYPE_BOOLEAN);
         }
 
-        fn push_ipaddress(&mut self, ip: &[u8; 4]) {
-            self.push_chunk(ip);
+        fn push_ipaddress(&mut self, ip: [u8; 4]) {
+            self.push_chunk(&ip);
             self.push_length(ip.len());
             self.push_byte(snmp::TYPE_IPADDRESS);
         }
@@ -424,14 +424,14 @@ pub mod pdu {
                     let mut subid = *subid;
                     let mut last_byte = true;
                     loop {
-                        assert!(pos != 0);
+                        assert_ne!(pos, 0);
                         if last_byte {
                             // continue bit is cleared
-                            output[pos] = (subid & 0b01111111) as u8;
+                            output[pos] = (subid & 0b0111_1111) as u8;
                             last_byte = false;
                         } else {
                             // continue bit is set
-                            output[pos] = (subid | 0b10000000) as u8;
+                            output[pos] = (subid | 0b1000_0000) as u8;
                         }
                         pos -= 1;
                         subid >>= 7;
@@ -470,7 +470,7 @@ pub mod pdu {
                 });
                 buf.push_integer(0); // error index
                 buf.push_integer(0); // error status
-                buf.push_integer(req_id as i64);
+                buf.push_integer(i64::from(req_id));
             });
             buf.push_octet_string(community);
             buf.push_integer(snmp::VERSION_2 as i64);
@@ -489,15 +489,21 @@ pub mod pdu {
                 });
                 buf.push_integer(0); // error index
                 buf.push_integer(0); // error status
-                buf.push_integer(req_id as i64);
+                buf.push_integer(i64::from(req_id));
             });
             buf.push_octet_string(community);
             buf.push_integer(snmp::VERSION_2 as i64);
         });
     }
 
-    pub fn build_getbulk(community: &[u8], req_id: i32, names: &[&[u32]],
-                         non_repeaters: u32, max_repetitions: u32, buf: &mut Buf) {
+    pub fn build_getbulk(
+        community: &[u8],
+        req_id: i32,
+        names: &[&[u32]],
+        non_repeaters: u32,
+        max_repetitions: u32,
+        buf: &mut Buf,
+    ) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_BULK, |buf| {
@@ -509,9 +515,9 @@ pub mod pdu {
                         });
                     }
                 });
-                buf.push_integer(max_repetitions as i64);
-                buf.push_integer(non_repeaters as i64);
-                buf.push_integer(req_id as i64);
+                buf.push_integer(i64::from(max_repetitions));
+                buf.push_integer(i64::from(non_repeaters));
+                buf.push_integer(i64::from(req_id));
             });
             buf.push_octet_string(community);
             buf.push_integer(snmp::VERSION_2 as i64);
@@ -527,17 +533,19 @@ pub mod pdu {
                         buf.push_sequence(|buf| {
                             use Value::*;
                             match *val {
-                                Boolean(b)                  => buf.push_boolean(b),
-                                Null                        => buf.push_null(),
-                                Integer(i)                  => buf.push_integer(i),
-                                OctetString(ostr)           => buf.push_octet_string(ostr),
-                                ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
-                                IpAddress(ref ip)           => buf.push_ipaddress(ip),
-                                Counter32(i)                => buf.push_counter32(i),
-                                Unsigned32(i)               => buf.push_unsigned32(i),
-                                Timeticks(tt)               => buf.push_timeticks(tt),
-                                Opaque(bytes)               => buf.push_opaque(bytes),
-                                Counter64(i)                => buf.push_counter64(i),
+                                Boolean(b) => buf.push_boolean(b),
+                                Null => buf.push_null(),
+                                Integer(i) => buf.push_integer(i),
+                                OctetString(ref ostr) => buf.push_octet_string(ostr),
+                                ObjectIdentifier(ref objid) => {
+                                    buf.push_object_identifier_raw(objid.raw())
+                                }
+                                IpAddress(ip) => buf.push_ipaddress(ip),
+                                Counter32(i) => buf.push_counter32(i),
+                                Unsigned32(i) => buf.push_unsigned32(i),
+                                Timeticks(tt) => buf.push_timeticks(tt),
+                                Opaque(ref bytes) => buf.push_opaque(bytes),
+                                Counter64(i) => buf.push_counter64(i),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -546,14 +554,19 @@ pub mod pdu {
                 });
                 buf.push_integer(0);
                 buf.push_integer(0);
-                buf.push_integer(req_id as i64);
+                buf.push_integer(i64::from(req_id));
             });
             buf.push_octet_string(community);
             buf.push_integer(snmp::VERSION_2 as i64);
         });
     }
 
-    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+    pub fn build_response(
+        community: &[u8],
+        req_id: i32,
+        values: &[(&[u32], Value)],
+        buf: &mut Buf,
+    ) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
@@ -562,20 +575,22 @@ pub mod pdu {
                         buf.push_sequence(|buf| {
                             use Value::*;
                             match *val {
-                                Boolean(b)                  => buf.push_boolean(b),
-                                Null                        => buf.push_null(),
-                                Integer(i)                  => buf.push_integer(i),
-                                OctetString(ostr)           => buf.push_octet_string(ostr),
-                                ObjectIdentifier(ref objid) => buf.push_object_identifier_raw(objid.raw()),
-                                IpAddress(ref ip)           => buf.push_ipaddress(ip),
-                                Counter32(i)                => buf.push_counter32(i),
-                                Unsigned32(i)               => buf.push_unsigned32(i),
-                                Timeticks(tt)               => buf.push_timeticks(tt),
-                                Opaque(bytes)               => buf.push_opaque(bytes),
-                                Counter64(i)                => buf.push_counter64(i),
-                                EndOfMibView                => buf.push_endofmibview(),
-                                NoSuchObject                => buf.push_nosuchobject(),
-                                NoSuchInstance              => buf.push_nosuchinstance(),
+                                Boolean(b) => buf.push_boolean(b),
+                                Null => buf.push_null(),
+                                Integer(i) => buf.push_integer(i),
+                                OctetString(ref ostr) => buf.push_octet_string(ostr),
+                                ObjectIdentifier(ref objid) => {
+                                    buf.push_object_identifier_raw(objid.raw())
+                                }
+                                IpAddress(ip) => buf.push_ipaddress(ip),
+                                Counter32(i) => buf.push_counter32(i),
+                                Unsigned32(i) => buf.push_unsigned32(i),
+                                Timeticks(tt) => buf.push_timeticks(tt),
+                                Opaque(ref bytes) => buf.push_opaque(bytes),
+                                Counter64(i) => buf.push_counter64(i),
+                                EndOfMibView => buf.push_endofmibview(),
+                                NoSuchObject => buf.push_nosuchobject(),
+                                NoSuchInstance => buf.push_nosuchinstance(),
                                 _ => unimplemented!(),
                             }
                             buf.push_object_identifier(name); // name
@@ -584,7 +599,7 @@ pub mod pdu {
                 });
                 buf.push_integer(0);
                 buf.push_integer(0);
-                buf.push_integer(req_id as i64);
+                buf.push_integer(i64::from(req_id));
             });
             buf.push_octet_string(community);
             buf.push_integer(snmp::VERSION_2 as i64);
@@ -599,7 +614,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
     let mut bytes = [0u8; 8];
     bytes[(mem::size_of::<i64>() - i.len())..].copy_from_slice(i);
 
-    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be()};
+    let mut ret = unsafe { mem::transmute::<[u8; 8], i64>(bytes).to_be() };
     {
         //sign extend
         let shift_amount = (mem::size_of::<i64>() - i.len()) * 8;
@@ -610,19 +625,19 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
 
 /// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
 #[derive(PartialEq)]
-pub struct ObjectIdentifier<'a> {
-    inner: &'a [u8],
+pub struct ObjectIdentifier {
+    inner: Bytes,
 }
 
-impl<'a> fmt::Debug for ObjectIdentifier<'a> {
+impl fmt::Debug for ObjectIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_list().entries(self.inner).finish()
+        f.debug_list().entries(&self.inner).finish()
     }
 }
 
 pub type ObjIdBuf = [u32; 128];
 
-impl<'a> fmt::Display for ObjectIdentifier<'a> {
+impl fmt::Display for ObjectIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
         let mut first = true;
@@ -638,12 +653,12 @@ impl<'a> fmt::Display for ObjectIdentifier<'a> {
                 }
                 Ok(())
             }
-            Err(err) => f.write_fmt(format_args!("Invalid OID: {:?}", err))
+            Err(err) => f.write_fmt(format_args!("Invalid OID: {:?}", err)),
         }
     }
 }
 
-impl<'a> PartialEq<[u32]> for ObjectIdentifier<'a> {
+impl PartialEq<[u32]> for ObjectIdentifier {
     fn eq(&self, other: &[u32]) -> bool {
         let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
         if let Ok(name) = self.read_name(&mut buf) {
@@ -654,29 +669,32 @@ impl<'a> PartialEq<[u32]> for ObjectIdentifier<'a> {
     }
 }
 
-impl<'a, 'b> PartialEq<&'b [u32]> for ObjectIdentifier<'a> {
+impl<'b> PartialEq<&'b [u32]> for ObjectIdentifier {
     fn eq(&self, other: &&[u32]) -> bool {
         self == *other
     }
 }
 
-impl<'a> ObjectIdentifier<'a> {
-    fn from_bytes(bytes: &[u8]) -> ObjectIdentifier {
+impl ObjectIdentifier {
+    fn from_bytes<T>(bytes: T) -> ObjectIdentifier
+    where
+        T: AsRef<[u8]>,
+    {
         ObjectIdentifier {
-            inner: bytes,
+            inner: bytes.as_ref().into(),
         }
     }
 
     /// Reads out the OBJECT IDENTIFIER sub-IDs as a slice of u32s.
     /// Caller must provide storage for 128 sub-IDs.
     pub fn read_name<'b>(&self, out: &'b mut ObjIdBuf) -> SnmpResult<&'b [u32]> {
-        let input = self.inner;
+        let input = &self.inner;
         let output = &mut out[..];
         if input.len() < 2 {
             return Err(SnmpError::AsnInvalidLen);
         }
-        let subid1 = (input[0] / 40) as u32;
-        let subid2 = (input[0] % 40) as u32;
+        let subid1 = u32::from(input[0] / 40);
+        let subid2 = u32::from(input[0] % 40);
         output[0] = subid1;
         output[1] = subid2;
         let mut pos = 2;
@@ -686,10 +704,10 @@ impl<'a> ObjectIdentifier<'a> {
             if pos == output.len() {
                 return Err(SnmpError::AsnEof);
             }
-            is_done = b & 0b10000000 == 0;
-            let val = b & 0b01111111;
+            is_done = b & 0b1000_0000 == 0;
+            let val = b & 0b0111_1111;
             cur_oid = cur_oid.checked_shl(7).ok_or(SnmpError::AsnIntOverflow)?;
-            cur_oid |= val as u32;
+            cur_oid |= u32::from(val);
             if is_done {
                 output[pos] = cur_oid;
                 pos += 1;
@@ -703,8 +721,8 @@ impl<'a> ObjectIdentifier<'a> {
         }
     }
 
-    pub fn raw(&self) -> &'a [u8] {
-        self.inner
+    pub fn raw(&self) -> &[u8] {
+        &self.inner
     }
 }
 
@@ -719,28 +737,25 @@ impl<'a> ObjectIdentifier<'a> {
 /// - extended tag IDs.
 /// - indefinite lengths (disallowed by DER).
 /// - INTEGER values not representable by i64.
-pub struct AsnReader<'a> {
-    inner: &'a [u8],
+#[derive(Clone)]
+pub struct AsnReader {
+    inner: Bytes,
 }
 
-impl<'a> Clone for AsnReader<'a> {
-    fn clone(&self) -> AsnReader<'a> {
-        AsnReader {
-            inner: self.inner,
-        }
-    }
-}
-
-impl<'a> fmt::Debug for AsnReader<'a> {
+impl fmt::Debug for AsnReader {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
 
-impl<'a> AsnReader<'a> {
-
-    pub fn from_bytes(bytes: &[u8]) -> AsnReader {
-        AsnReader {inner: bytes}
+impl AsnReader {
+    pub fn from_bytes<T>(bytes: T) -> AsnReader
+    where
+        T: AsRef<[u8]>,
+    {
+        AsnReader {
+            inner: bytes.as_ref().into(),
+        }
     }
 
     pub fn peek_byte(&mut self) -> SnmpResult<u8> {
@@ -752,39 +767,37 @@ impl<'a> AsnReader<'a> {
     }
 
     pub fn read_byte(&mut self) -> SnmpResult<u8> {
-        match self.inner.split_first() {
-            Some((head, tail)) => {
-                self.inner = tail;
-                Ok(*head)
-            }
-            _ => Err(SnmpError::AsnEof)
-        }
+        let (head, tail) = match self.inner.split_first() {
+            Some((head, tail)) => (*head, tail.into()),
+            _ => return Err(SnmpError::AsnEof),
+        };
+        self.inner = tail;
+        Ok(head)
     }
 
     pub fn read_length(&mut self) -> SnmpResult<usize> {
         if let Some((head, tail)) = self.inner.split_first() {
             let o: usize;
-            if head < &128 {
+            if *head < 128 {
                 // short form
                 o = *head as usize;
-                self.inner = tail;
+                self.inner = tail.into();
                 Ok(o)
             } else if head == &0xff {
                 Err(SnmpError::AsnInvalidLen) // reserved for future use
             } else {
                 // long form
-                let length_len = (*head & 0b01111111) as usize;
+                let length_len = (*head & 0b0111_1111) as usize;
                 if length_len == 0 {
                     // Indefinite length. Not allowed in DER.
                     return Err(SnmpError::AsnInvalidLen);
                 }
 
                 let mut bytes = [0u8; USIZE_LEN];
-                bytes[(USIZE_LEN - length_len)..]
-                    .copy_from_slice(&tail[..length_len]);
+                bytes[(USIZE_LEN - length_len)..].copy_from_slice(&tail[..length_len]);
 
-                o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be()};
-                self.inner = &tail[length_len as usize..];
+                o = unsafe { mem::transmute::<[u8; USIZE_LEN], usize>(bytes).to_be() };
+                self.inner = tail[length_len as usize..].into();
                 Ok(o)
             }
         } else {
@@ -801,12 +814,15 @@ impl<'a> AsnReader<'a> {
         if val_len > self.inner.len() {
             return Err(SnmpError::AsnInvalidLen);
         }
-        let (val, remaining) = self.inner.split_at(val_len);
+        let (result, remaining) = {
+            let parts = self.inner.split_at(val_len);
+            (decode_i64(parts.0), parts.1.into())
+        };
         self.inner = remaining;
-        decode_i64(val)
+        result
     }
 
-    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<&'a [u8]> {
+    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<Bytes> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
             return Err(SnmpError::AsnWrongType);
@@ -815,13 +831,17 @@ impl<'a> AsnReader<'a> {
         if val_len > self.inner.len() {
             return Err(SnmpError::AsnInvalidLen);
         }
-        let (val, remaining) = self.inner.split_at(val_len);
+        let (result, remaining) = {
+            let parts = self.inner.split_at(val_len);
+            (parts.0.into(), parts.1.into())
+        };
         self.inner = remaining;
-        Ok(val)
+        Ok(result)
     }
 
     pub fn read_constructed<F>(&mut self, expected_ident: u8, f: F) -> SnmpResult<()>
-        where F: Fn(&mut AsnReader) -> SnmpResult<()>
+    where
+        F: Fn(&mut AsnReader) -> SnmpResult<()>,
     {
         let ident = self.read_byte()?;
         if ident != expected_ident {
@@ -833,7 +853,7 @@ impl<'a> AsnReader<'a> {
         }
         let (seq_bytes, remaining) = self.inner.split_at(seq_len);
         let mut reader = AsnReader::from_bytes(seq_bytes);
-        self.inner = remaining;
+        self.inner = remaining.into();
         f(&mut reader)
     }
 
@@ -861,7 +881,7 @@ impl<'a> AsnReader<'a> {
         self.read_i64_type(asn1::TYPE_INTEGER)
     }
 
-    pub fn read_asn_octetstring(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_asn_octetstring(&mut self) -> SnmpResult<Bytes> {
         self.read_raw(asn1::TYPE_OCTETSTRING)
     }
 
@@ -878,7 +898,7 @@ impl<'a> AsnReader<'a> {
         }
     }
 
-    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<ObjectIdentifier<'a>> {
+    pub fn read_asn_objectidentifier(&mut self) -> SnmpResult<ObjectIdentifier> {
         let ident = self.read_byte()?;
         if ident != asn1::TYPE_OBJECTIDENTIFIER {
             return Err(SnmpError::AsnWrongType);
@@ -887,14 +907,18 @@ impl<'a> AsnReader<'a> {
         if val_len > self.inner.len() {
             return Err(SnmpError::AsnInvalidLen);
         }
-        let (input, remaining) = self.inner.split_at(val_len);
+        let (result, remaining) = {
+            let parts = self.inner.split_at(val_len);
+            (ObjectIdentifier::from_bytes(parts.0), parts.1.into())
+        };
         self.inner = remaining;
 
-        Ok(ObjectIdentifier::from_bytes(input))
+        Ok(result)
     }
 
     pub fn read_asn_sequence<F>(&mut self, f: F) -> SnmpResult<()>
-        where F: Fn(&mut AsnReader) -> SnmpResult<()>
+    where
+        F: Fn(&mut AsnReader) -> SnmpResult<()>,
     {
         self.read_constructed(asn1::TYPE_SEQUENCE, f)
     }
@@ -925,7 +949,7 @@ impl<'a> AsnReader<'a> {
         self.read_i64_type(snmp::TYPE_COUNTER64).map(|v| v as u64)
     }
 
-    pub fn read_snmp_opaque(&mut self) -> SnmpResult<&'a [u8]> {
+    pub fn read_snmp_opaque(&mut self) -> SnmpResult<Bytes> {
         self.read_raw(snmp::TYPE_OPAQUE)
     }
 
@@ -987,108 +1011,129 @@ impl<'a> AsnReader<'a> {
     // {
     //     self.read_constructed(snmp::MSG_TRAP, f)
     // }
-
 }
 
-
-pub enum Value<'a> {
+pub enum Value {
     Boolean(bool),
     Null,
     Integer(i64),
-    OctetString(&'a [u8]),
-    ObjectIdentifier(ObjectIdentifier<'a>),
-    Sequence(AsnReader<'a>),
-    Set(AsnReader<'a>),
-    Constructed(u8, AsnReader<'a>),
+    OctetString(Bytes),
+    ObjectIdentifier(ObjectIdentifier),
+    Sequence(AsnReader),
+    Set(AsnReader),
+    Constructed(u8, AsnReader),
 
-    IpAddress([u8;4]),
+    IpAddress([u8; 4]),
     Counter32(u32),
     Unsigned32(u32),
     Timeticks(u32),
-    Opaque(&'a [u8]),
+    Opaque(Bytes),
     Counter64(u64),
 
     EndOfMibView,
     NoSuchObject,
     NoSuchInstance,
 
-    SnmpGetRequest(AsnReader<'a>),
-    SnmpGetNextRequest(AsnReader<'a>),
-    SnmpGetBulkRequest(AsnReader<'a>),
-    SnmpResponse(AsnReader<'a>),
-    SnmpSetRequest(AsnReader<'a>),
-    SnmpInformRequest(AsnReader<'a>),
-    SnmpTrap(AsnReader<'a>),
-    SnmpReport(AsnReader<'a>),
+    SnmpGetRequest(AsnReader),
+    SnmpGetNextRequest(AsnReader),
+    SnmpGetBulkRequest(AsnReader),
+    SnmpResponse(AsnReader),
+    SnmpSetRequest(AsnReader),
+    SnmpInformRequest(AsnReader),
+    SnmpTrap(AsnReader),
+    SnmpReport(AsnReader),
 }
 
-impl<'a> fmt::Debug for Value<'a> {
+impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Value::*;
         match *self {
-            Boolean(v)                   => write!(f, "BOOLEAN: {}", v),
-            Integer(n)                   => write!(f, "INTEGER: {}", n),
-            OctetString(slice)           => write!(f, "OCTET STRING: {}", String::from_utf8_lossy(slice)),
+            Boolean(v) => write!(f, "BOOLEAN: {}", v),
+            Integer(n) => write!(f, "INTEGER: {}", n),
+            OctetString(ref slice) => {
+                write!(f, "OCTET STRING: {}", String::from_utf8_lossy(&slice))
+            }
             ObjectIdentifier(ref obj_id) => write!(f, "OBJECT IDENTIFIER: {}", obj_id),
-            Null                         => write!(f, "NULL"),
-            Sequence(ref val)            => write!(f, "SEQUENCE: {:#?}", val),
-            Set(ref val)                 => write!(f, "SET: {:?}", val),
-            Constructed(ident, ref val)  => write!(f, "CONSTRUCTED-{}: {:#?}", ident, val),
+            Null => write!(f, "NULL"),
+            Sequence(ref val) => write!(f, "SEQUENCE: {:#?}", val),
+            Set(ref val) => write!(f, "SET: {:?}", val),
+            Constructed(ident, ref val) => write!(f, "CONSTRUCTED-{}: {:#?}", ident, val),
 
-            IpAddress(val)               => write!(f, "IP ADDRESS: {}.{}.{}.{}", val[0], val[1], val[2], val[3]),
-            Counter32(val)               => write!(f, "COUNTER32: {}", val),
-            Unsigned32(val)              => write!(f, "UNSIGNED32: {}", val),
-            Timeticks(val)               => write!(f, "TIMETICKS: {}", val),
-            Opaque(val)                  => write!(f, "OPAQUE: {:?}", val),
-            Counter64(val)               => write!(f, "COUNTER64: {}", val),
+            IpAddress(val) => write!(f, "IP ADDRESS: {}.{}.{}.{}", val[0], val[1], val[2], val[3]),
+            Counter32(val) => write!(f, "COUNTER32: {}", val),
+            Unsigned32(val) => write!(f, "UNSIGNED32: {}", val),
+            Timeticks(val) => write!(f, "TIMETICKS: {}", val),
+            Opaque(ref val) => write!(f, "OPAQUE: {:?}", val),
+            Counter64(val) => write!(f, "COUNTER64: {}", val),
 
-            EndOfMibView                 => write!(f, "END OF MIB VIEW"),
-            NoSuchObject                 => write!(f, "NO SUCH OBJECT"),
-            NoSuchInstance               => write!(f, "NO SUCH INSTANCE"),
+            EndOfMibView => write!(f, "END OF MIB VIEW"),
+            NoSuchObject => write!(f, "NO SUCH OBJECT"),
+            NoSuchInstance => write!(f, "NO SUCH INSTANCE"),
 
-            SnmpGetRequest(ref val)      => write!(f, "SNMP GET REQUEST: {:#?}", val),
-            SnmpGetNextRequest(ref val)  => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
-            SnmpGetBulkRequest(ref val)  => write!(f, "SNMP GET BULK REQUEST: {:#?}", val),
-            SnmpResponse(ref val)        => write!(f, "SNMP RESPONSE: {:#?}", val),
-            SnmpSetRequest(ref val)      => write!(f, "SNMP SET REQUEST: {:#?}", val),
-            SnmpInformRequest(ref val)   => write!(f, "SNMP INFORM REQUEST: {:#?}", val),
-            SnmpTrap(ref val)            => write!(f, "SNMP TRAP: {:#?}", val),
-            SnmpReport(ref val)          => write!(f, "SNMP REPORT: {:#?}", val),
+            SnmpGetRequest(ref val) => write!(f, "SNMP GET REQUEST: {:#?}", val),
+            SnmpGetNextRequest(ref val) => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
+            SnmpGetBulkRequest(ref val) => write!(f, "SNMP GET BULK REQUEST: {:#?}", val),
+            SnmpResponse(ref val) => write!(f, "SNMP RESPONSE: {:#?}", val),
+            SnmpSetRequest(ref val) => write!(f, "SNMP SET REQUEST: {:#?}", val),
+            SnmpInformRequest(ref val) => write!(f, "SNMP INFORM REQUEST: {:#?}", val),
+            SnmpTrap(ref val) => write!(f, "SNMP TRAP: {:#?}", val),
+            SnmpReport(ref val) => write!(f, "SNMP REPORT: {:#?}", val),
         }
     }
 }
 
-impl<'a> Iterator for AsnReader<'a> {
-    type Item = Value<'a>;
+impl Iterator for AsnReader {
+    type Item = Value;
 
-    fn next(&mut self) -> Option<Value<'a>> {
+    fn next(&mut self) -> Option<Value> {
         use Value::*;
         if let Ok(ident) = self.peek_byte() {
             let ret: SnmpResult<Value> = match ident {
-                asn1::TYPE_BOOLEAN          => self.read_asn_boolean().map(Boolean),
-                asn1::TYPE_NULL             => self.read_asn_null().map(|_| Null),
-                asn1::TYPE_INTEGER          => self.read_asn_integer().map(Integer),
-                asn1::TYPE_OCTETSTRING      => self.read_asn_octetstring().map(OctetString),
-                asn1::TYPE_OBJECTIDENTIFIER => self.read_asn_objectidentifier().map(ObjectIdentifier),
-                asn1::TYPE_SEQUENCE         => self.read_raw(ident).map(|v| Sequence(AsnReader::from_bytes(v))),
-                asn1::TYPE_SET              => self.read_raw(ident).map(|v| Set(AsnReader::from_bytes(v))),
-                snmp::TYPE_IPADDRESS        => self.read_snmp_ipaddress().map(IpAddress),
-                snmp::TYPE_COUNTER32        => self.read_snmp_counter32().map(Counter32),
-                snmp::TYPE_UNSIGNED32       => self.read_snmp_unsigned32().map(Unsigned32),
-                snmp::TYPE_TIMETICKS        => self.read_snmp_timeticks().map(Timeticks),
-                snmp::TYPE_OPAQUE           => self.read_snmp_opaque().map(Opaque),
-                snmp::TYPE_COUNTER64        => self.read_snmp_counter64().map(Counter64),
-                snmp::MSG_GET               => self.read_raw(ident).map(|v| SnmpGetRequest(AsnReader::from_bytes(v))),
-                snmp::MSG_GET_NEXT          => self.read_raw(ident).map(|v| SnmpGetNextRequest(AsnReader::from_bytes(v))),
-                snmp::MSG_GET_BULK          => self.read_raw(ident).map(|v| SnmpGetBulkRequest(AsnReader::from_bytes(v))),
-                snmp::MSG_RESPONSE          => self.read_raw(ident).map(|v| SnmpResponse(AsnReader::from_bytes(v))),
-                snmp::MSG_SET               => self.read_raw(ident).map(|v| SnmpSetRequest(AsnReader::from_bytes(v))),
-                snmp::MSG_INFORM            => self.read_raw(ident).map(|v| SnmpInformRequest(AsnReader::from_bytes(v))),
-                snmp::MSG_TRAP              => self.read_raw(ident).map(|v| SnmpTrap(AsnReader::from_bytes(v))),
-                snmp::MSG_REPORT            => self.read_raw(ident).map(|v| SnmpReport(AsnReader::from_bytes(v))),
-                ident if ident & asn1::CONSTRUCTED == asn1::CONSTRUCTED =>
-                                              self.read_raw(ident).map(|v| Constructed(ident, AsnReader::from_bytes(v))),
-                _ =>                          Err(SnmpError::AsnUnsupportedType),
+                asn1::TYPE_BOOLEAN => self.read_asn_boolean().map(Boolean),
+                asn1::TYPE_NULL => self.read_asn_null().map(|_| Null),
+                asn1::TYPE_INTEGER => self.read_asn_integer().map(Integer),
+                asn1::TYPE_OCTETSTRING => self.read_asn_octetstring().map(OctetString),
+                asn1::TYPE_OBJECTIDENTIFIER => {
+                    self.read_asn_objectidentifier().map(ObjectIdentifier)
+                }
+                asn1::TYPE_SEQUENCE => self
+                    .read_raw(ident)
+                    .map(|v| Sequence(AsnReader::from_bytes(v))),
+                asn1::TYPE_SET => self.read_raw(ident).map(|v| Set(AsnReader::from_bytes(v))),
+                snmp::TYPE_IPADDRESS => self.read_snmp_ipaddress().map(IpAddress),
+                snmp::TYPE_COUNTER32 => self.read_snmp_counter32().map(Counter32),
+                snmp::TYPE_UNSIGNED32 => self.read_snmp_unsigned32().map(Unsigned32),
+                snmp::TYPE_TIMETICKS => self.read_snmp_timeticks().map(Timeticks),
+                snmp::TYPE_OPAQUE => self.read_snmp_opaque().map(Opaque),
+                snmp::TYPE_COUNTER64 => self.read_snmp_counter64().map(Counter64),
+                snmp::MSG_GET => self
+                    .read_raw(ident)
+                    .map(|v| SnmpGetRequest(AsnReader::from_bytes(v))),
+                snmp::MSG_GET_NEXT => self
+                    .read_raw(ident)
+                    .map(|v| SnmpGetNextRequest(AsnReader::from_bytes(v))),
+                snmp::MSG_GET_BULK => self
+                    .read_raw(ident)
+                    .map(|v| SnmpGetBulkRequest(AsnReader::from_bytes(v))),
+                snmp::MSG_RESPONSE => self
+                    .read_raw(ident)
+                    .map(|v| SnmpResponse(AsnReader::from_bytes(v))),
+                snmp::MSG_SET => self
+                    .read_raw(ident)
+                    .map(|v| SnmpSetRequest(AsnReader::from_bytes(v))),
+                snmp::MSG_INFORM => self
+                    .read_raw(ident)
+                    .map(|v| SnmpInformRequest(AsnReader::from_bytes(v))),
+                snmp::MSG_TRAP => self
+                    .read_raw(ident)
+                    .map(|v| SnmpTrap(AsnReader::from_bytes(v))),
+                snmp::MSG_REPORT => self
+                    .read_raw(ident)
+                    .map(|v| SnmpReport(AsnReader::from_bytes(v))),
+                ident if ident & asn1::CONSTRUCTED == asn1::CONSTRUCTED => self
+                    .read_raw(ident)
+                    .map(|v| Constructed(ident, AsnReader::from_bytes(v))),
+                _ => Err(SnmpError::AsnUnsupportedType),
             };
             ret.ok()
         } else {
@@ -1097,149 +1142,37 @@ impl<'a> Iterator for AsnReader<'a> {
     }
 }
 
-/// Synchronous SNMPv2 client.
-pub struct SyncSession {
-    socket: UdpSocket,
-    community: Vec<u8>,
-    req_id: Wrapping<i32>,
-    send_pdu: pdu::Buf,
-    recv_buf: [u8; BUFFER_SIZE],
-}
-
-impl SyncSession {
-    pub fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32) -> io::Result<Self>
-        where SA: ToSocketAddrs
-    {
-        let socket = match destination.to_socket_addrs()?.next() {
-            Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::new(0,0,0,0), 0))?,
-            Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0,0,0,0,0,0,0,0), 0))?,
-            None => panic!("empty list of socket addrs"),
-        };
-        socket.set_read_timeout(timeout)?;
-        socket.connect(destination)?;
-        Ok(SyncSession {
-            socket: socket,
-            community: community.to_vec(),
-            req_id: Wrapping(starting_req_id),
-            send_pdu: pdu::Buf::default(),
-            recv_buf: [0; 4096],
-        })
+fn handle_response(req_id: i32, community: &[u8], response: Bytes) -> SnmpResult<SnmpPdu> {
+    let resp = SnmpPdu::from_bytes(response)?;
+    if resp.message_type != SnmpMessageType::Response {
+        return Err(SnmpError::AsnWrongType);
     }
-
-    fn send_and_recv(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8]) -> SnmpResult<usize> {
-        if let Ok(_pdu_len) = socket.send(&pdu[..]) {
-            match socket.recv(out) {
-                Ok(len) => Ok(len),
-                Err(_) => Err(SnmpError::ReceiveError)
-            }
-        } else {
-            Err(SnmpError::SendError)
-        }
+    if resp.req_id != req_id {
+        return Err(SnmpError::RequestIdMismatch);
     }
-
-    pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
+    if resp.community != community {
+        return Err(SnmpError::CommunityMismatch);
     }
-
-    pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
-
-    pub fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_getbulk(self.community.as_slice(), req_id, names, non_repeaters, max_repetitions, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
-
-    /// # Panics if any of the values are not one of these supported types:
-    ///   - `Boolean`
-    ///   - `Null`
-    ///   - `Integer`
-    ///   - `OctetString`
-    ///   - `ObjectIdentifier`
-    ///   - `IpAddress`
-    ///   - `Counter32`
-    ///   - `Unsigned32`
-    ///   - `Timeticks`
-    ///   - `Opaque`
-    ///   - `Counter64`
-    pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
+    Ok(resp)
 }
 
 #[derive(Debug)]
-pub struct SnmpPdu<'a> {
+pub struct SnmpPdu {
     version: i64,
-    community: &'a [u8],
+    community: Bytes,
     pub message_type: SnmpMessageType,
     pub req_id: i32,
     pub error_status: u32,
     pub error_index: u32,
-    pub varbinds: Varbinds<'a>,
+    pub varbinds: Varbinds,
 }
 
-impl<'a> SnmpPdu<'a> {
-    pub fn from_bytes(bytes: &'a [u8]) -> SnmpResult<SnmpPdu<'a>> {
-        let seq = AsnReader::from_bytes(bytes).read_raw(asn1::TYPE_SEQUENCE)?;
+impl SnmpPdu {
+    pub fn from_bytes<T>(bytes: T) -> SnmpResult<SnmpPdu>
+    where
+        T: AsRef<[u8]>,
+    {
+        let seq = AsnReader::from_bytes(bytes.as_ref()).read_raw(asn1::TYPE_SEQUENCE)?;
         let mut rdr = AsnReader::from_bytes(seq);
         let version = rdr.read_asn_integer()?;
         if version != snmp::VERSION_2 {
@@ -1252,34 +1185,32 @@ impl<'a> SnmpPdu<'a> {
         let mut response_pdu = AsnReader::from_bytes(rdr.read_raw(ident)?);
 
         let req_id = response_pdu.read_asn_integer()?;
-        if req_id < i32::min_value() as i64 || req_id > i32::max_value() as i64 {
+        if req_id < i64::from(i32::min_value()) || req_id > i64::from(i32::max_value()) {
             return Err(SnmpError::ValueOutOfRange);
         }
 
         let error_status = response_pdu.read_asn_integer()?;
-        if error_status < 0 || error_status > i32::max_value() as i64 {
+        if error_status < 0 || error_status > i64::from(i32::max_value()) {
             return Err(SnmpError::ValueOutOfRange);
         }
 
         let error_index = response_pdu.read_asn_integer()?;
-        if error_index < 0 || error_index > i32::max_value() as i64 {
+        if error_index < 0 || error_index > i64::from(i32::max_value()) {
             return Err(SnmpError::ValueOutOfRange);
         }
 
         let varbind_bytes = response_pdu.read_raw(asn1::TYPE_SEQUENCE)?;
         let varbinds = Varbinds::from_bytes(varbind_bytes);
 
-        Ok(
-            SnmpPdu {
-                version: version,
-                community: community,
-                message_type: message_type,
-                req_id: req_id as i32,
-                error_status: error_status as u32,
-                error_index: error_index as u32,
-                varbinds: varbinds,
-            }
-        )
+        Ok(SnmpPdu {
+            version,
+            community,
+            message_type,
+            req_id: req_id as i32,
+            error_status: error_status as u32,
+            error_index: error_index as u32,
+            varbinds,
+        })
     }
 }
 
@@ -1298,28 +1229,26 @@ pub enum SnmpMessageType {
 impl SnmpMessageType {
     pub fn from_ident(ident: u8) -> SnmpResult<SnmpMessageType> {
         use SnmpMessageType::*;
-        Ok(
-            match ident {
-                snmp::MSG_GET      => GetRequest,
-                snmp::MSG_GET_NEXT => GetNextRequest,
-                snmp::MSG_GET_BULK => GetBulkRequest,
-                snmp::MSG_RESPONSE => Response,
-                snmp::MSG_SET      => SetRequest,
-                snmp::MSG_INFORM   => InformRequest,
-                snmp::MSG_TRAP     => Trap,
-                snmp::MSG_REPORT   => Report,
-                _ => return Err(SnmpError::AsnWrongType),
-            }
-        )
+        Ok(match ident {
+            snmp::MSG_GET => GetRequest,
+            snmp::MSG_GET_NEXT => GetNextRequest,
+            snmp::MSG_GET_BULK => GetBulkRequest,
+            snmp::MSG_RESPONSE => Response,
+            snmp::MSG_SET => SetRequest,
+            snmp::MSG_INFORM => InformRequest,
+            snmp::MSG_TRAP => Trap,
+            snmp::MSG_REPORT => Report,
+            _ => return Err(SnmpError::AsnWrongType),
+        })
     }
 }
 
 #[derive(Clone)]
-pub struct Varbinds<'a> {
-    inner:  AsnReader<'a>,
+pub struct Varbinds {
+    inner: AsnReader,
 }
 
-impl<'a> fmt::Debug for Varbinds<'a> {
+impl fmt::Debug for Varbinds {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // f.debug_list().entries(self.clone()).finish()
         let mut ds = f.debug_struct("Varbinds");
@@ -1330,16 +1259,19 @@ impl<'a> fmt::Debug for Varbinds<'a> {
     }
 }
 
-impl<'a> Varbinds<'a> {
-    fn from_bytes(bytes: &'a [u8]) -> Varbinds<'a> {
+impl Varbinds {
+    fn from_bytes<T>(bytes: T) -> Varbinds
+    where
+        T: AsRef<[u8]>,
+    {
         Varbinds {
-            inner: AsnReader::from_bytes(bytes)
+            inner: AsnReader::from_bytes(bytes.as_ref()),
         }
     }
 }
 
-impl<'a> Iterator for Varbinds<'a> {
-    type Item = (ObjectIdentifier<'a>, Value<'a>);
+impl Iterator for Varbinds {
+    type Item = (ObjectIdentifier, Value);
     fn next(&mut self) -> Option<Self::Item> {
         if let Ok(seq) = self.inner.read_raw(asn1::TYPE_SEQUENCE) {
             let mut pair = AsnReader::from_bytes(seq);
