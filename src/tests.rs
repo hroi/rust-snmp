@@ -48,7 +48,7 @@ fn asn_parse_getnext_pdu() {
             let version = rdr.read_asn_integer()?;
             assert_eq!(version, snmp::VERSION_2 as i64);
             let community = rdr.read_asn_octetstring()?;
-            assert_eq!(community.as_ref(), b"tyS0n43d");
+            assert_eq!(&community, b"tyS0n43d");
             println!("version: {}", version);
             let msg_ident = rdr.peek_byte()?;
             println!("msg_ident: {}", msg_ident);

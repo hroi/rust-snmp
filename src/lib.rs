@@ -97,8 +97,6 @@
 
 use std::{fmt, mem, ptr};
 
-use bytes::Bytes;
-
 #[cfg(target_pointer_width = "32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width = "64")]
@@ -226,7 +224,7 @@ pub mod pdu {
         fn default() -> Buf {
             Buf {
                 len: 0,
-                buf: unsafe { mem::uninitialized() },
+                buf: [0; BUFFER_SIZE],
             }
         }
     }
@@ -626,7 +624,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
 /// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
 #[derive(PartialEq)]
 pub struct ObjectIdentifier {
-    inner: Bytes,
+    inner: Vec<u8>,
 }
 
 impl fmt::Debug for ObjectIdentifier {
@@ -639,7 +637,7 @@ pub type ObjIdBuf = [u32; 128];
 
 impl fmt::Display for ObjectIdentifier {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf: ObjIdBuf = [0; 128];
         let mut first = true;
         match self.read_name(&mut buf) {
             Ok(name) => {
@@ -660,7 +658,7 @@ impl fmt::Display for ObjectIdentifier {
 
 impl PartialEq<[u32]> for ObjectIdentifier {
     fn eq(&self, other: &[u32]) -> bool {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf: ObjIdBuf = [0; 128];
         if let Ok(name) = self.read_name(&mut buf) {
             name == other
         } else {
@@ -739,7 +737,7 @@ impl ObjectIdentifier {
 /// - INTEGER values not representable by i64.
 #[derive(Clone)]
 pub struct AsnReader {
-    inner: Bytes,
+    inner: Vec<u8>,
 }
 
 impl fmt::Debug for AsnReader {
@@ -822,7 +820,7 @@ impl AsnReader {
         result
     }
 
-    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<Bytes> {
+    pub fn read_raw(&mut self, expected_ident: u8) -> SnmpResult<Vec<u8>> {
         let ident = self.read_byte()?;
         if ident != expected_ident {
             return Err(SnmpError::AsnWrongType);
@@ -881,7 +879,7 @@ impl AsnReader {
         self.read_i64_type(asn1::TYPE_INTEGER)
     }
 
-    pub fn read_asn_octetstring(&mut self) -> SnmpResult<Bytes> {
+    pub fn read_asn_octetstring(&mut self) -> SnmpResult<Vec<u8>> {
         self.read_raw(asn1::TYPE_OCTETSTRING)
     }
 
@@ -949,7 +947,7 @@ impl AsnReader {
         self.read_i64_type(snmp::TYPE_COUNTER64).map(|v| v as u64)
     }
 
-    pub fn read_snmp_opaque(&mut self) -> SnmpResult<Bytes> {
+    pub fn read_snmp_opaque(&mut self) -> SnmpResult<Vec<u8>> {
         self.read_raw(snmp::TYPE_OPAQUE)
     }
 
@@ -1017,7 +1015,7 @@ pub enum Value {
     Boolean(bool),
     Null,
     Integer(i64),
-    OctetString(Bytes),
+    OctetString(Vec<u8>),
     ObjectIdentifier(ObjectIdentifier),
     Sequence(AsnReader),
     Set(AsnReader),
@@ -1027,7 +1025,7 @@ pub enum Value {
     Counter32(u32),
     Unsigned32(u32),
     Timeticks(u32),
-    Opaque(Bytes),
+    Opaque(Vec<u8>),
     Counter64(u64),
 
     EndOfMibView,
@@ -1142,7 +1140,7 @@ impl Iterator for AsnReader {
     }
 }
 
-fn handle_response(req_id: i32, community: &[u8], response: Bytes) -> SnmpResult<SnmpPdu> {
+fn handle_response(req_id: i32, community: &[u8], response: Vec<u8>) -> SnmpResult<SnmpPdu> {
     let resp = SnmpPdu::from_bytes(response)?;
     if resp.message_type != SnmpMessageType::Response {
         return Err(SnmpError::AsnWrongType);
@@ -1159,7 +1157,7 @@ fn handle_response(req_id: i32, community: &[u8], response: Bytes) -> SnmpResult
 #[derive(Debug)]
 pub struct SnmpPdu {
     version: i64,
-    community: Bytes,
+    community: Vec<u8>,
     pub message_type: SnmpMessageType,
     pub req_id: i32,
     pub error_status: u32,

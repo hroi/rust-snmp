@@ -4,7 +4,8 @@ use tokio;
 
 use snmp::{AsyncSession, Value};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     if let Some(param) = env::args().nth(1) {
         let sys_descr_oid = &[1, 3, 6, 1, 2, 1, 1, 1, 0];
         let agent_addr = format!("{}:161", param);
@@ -14,7 +15,7 @@ fn main() {
         let mut session = AsyncSession::new(&agent_addr, community, Some(timeout), 0).unwrap();
 
         let mut response =
-            tokio::runtime::current_thread::block_on_all(session.get(sys_descr_oid)).unwrap();
+            session.get(sys_descr_oid).await.unwrap();
 
         if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
             println!("sysDescr: {}", String::from_utf8_lossy(&sys_descr));
