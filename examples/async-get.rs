@@ -1,7 +1,5 @@
 use std::{env, time::Duration};
 
-use tokio;
-
 use snmp::{AsyncSession, Value};
 
 #[tokio::main]

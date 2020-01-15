@@ -14,7 +14,7 @@ edition = "2018"
 tokio = { version = "0.2.4", features = ["udp", "time"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "0.2.4", features = ["udp", "time", "macros"] }
+tokio = { version = "0.2.4", features = ["udp", "time", "macros", "rt-threaded"] }
 
 [features]
 default = ["async"]
