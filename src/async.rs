@@ -5,49 +5,48 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
-use futures::{Future, IntoFuture};
-use tokio::{net::UdpSocket, util::FutureExt};
+use tokio::net::UdpSocket;
 
-use crate::{handle_response, pdu, SnmpError, SnmpMessageType, SnmpPdu, Value, BUFFER_SIZE};
-
-type SnmpFuture<T> = Box<Future<Item = T, Error = SnmpError> + Send>;
+use crate::{handle_response, pdu, SnmpError, SnmpResult, SnmpMessageType, SnmpPdu, Value, BUFFER_SIZE};
 
 struct AsyncRequest {
     socket: UdpSocket,
-    destination: SocketAddr,
     timeout: Option<Duration>,
 }
 
 impl AsyncRequest {
-    fn send_and_recv(self, pdu: pdu::Buf) -> SnmpFuture<Bytes> {
-        let fut = self
-            .socket
-            .send_dgram(Bytes::from(&pdu[..]), &self.destination)
-            .map_err(|_| SnmpError::SendError);
+    async fn send_and_recv(&mut self, pdu: pdu::Buf) -> SnmpResult<Vec<u8>> {
+        use tokio::time;
+
+        self.socket
+            .send(&pdu[..])
+            .await
+            .map_err(|_| SnmpError::SendError)?;
+
+        let mut buf = [0; BUFFER_SIZE];
+
+        let fut = self.socket
+            .recv(&mut buf);
 
         match self.timeout {
-            Some(timeout) => Box::new(fut.and_then(move |(socket, _)| {
-                socket
-                    .recv_dgram(vec![0; BUFFER_SIZE])
-                    .timeout(timeout)
-                    .map_err(|_| SnmpError::ReceiveError)
-                    .and_then(|(_socket, buf, size, _addr)| Ok(buf[0..size].into()))
-            })),
-            None => Box::new(fut.and_then(|(socket, _)| {
-                socket
-                    .recv_dgram(vec![0; BUFFER_SIZE])
-                    .map_err(|_| SnmpError::ReceiveError)
-                    .and_then(|(_socket, buf, size, _addr)| Ok(buf[0..size].into()))
-            })),
+            Some(timeout) => {
+                time::timeout(timeout, fut)
+                .await
+                .map_err(|_| SnmpError::ReceiveError)?
+            },
+            None => {
+                fut.await
+            },
         }
+            .map_err(|_| SnmpError::ReceiveError)
+            .map(|size| buf[0..size].into())
     }
 }
 
 /// Asynchronous SNMPv2 client.
 pub struct AsyncSession {
     destination: SocketAddr,
-    community: Bytes,
+    community: Vec<u8>,
     timeout: Option<Duration>,
     req_id: Wrapping<i32>,
 }
@@ -76,33 +75,35 @@ impl AsyncSession {
         })
     }
 
-    fn new_socket(&self) -> io::Result<UdpSocket> {
-        let addr_to_bind = if self.destination.ip().is_ipv4() {
+    async fn new_socket(&self) -> io::Result<UdpSocket> {
+        let addr_to_bind: SocketAddr = if self.destination.ip().is_ipv4() {
             "0.0.0.0:0".parse().unwrap()
         } else {
             "[::]:0".parse().unwrap()
         };
-        UdpSocket::bind(&addr_to_bind).and_then(|socket| {
-            socket.connect(&self.destination)?;
-            Ok(socket)
-        })
+
+        let socket = UdpSocket::bind(&addr_to_bind)
+            .await?;
+        socket
+            .connect(&self.destination)
+            .await?;
+        Ok(socket)
     }
 
-    fn send_and_recv(&self, pdu: pdu::Buf) -> SnmpFuture<Bytes> {
-        match self.new_socket() {
+    async fn send_and_recv(&self, pdu: pdu::Buf) -> SnmpResult<Vec<u8>> {
+        match self.new_socket().await {
             Ok(socket) => {
-                let req = AsyncRequest {
+                let mut req = AsyncRequest {
                     socket,
-                    destination: self.destination,
                     timeout: self.timeout,
                 };
-                req.send_and_recv(pdu)
+                req.send_and_recv(pdu).await
             }
-            Err(_) => Box::new(Err(SnmpError::SocketError).into_future()),
+            Err(_) => Err(SnmpError::SocketError),
         }
     }
 
-    pub fn get(&mut self, name: &[u32]) -> SnmpFuture<SnmpPdu> {
+    pub async fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
@@ -111,13 +112,11 @@ impl AsyncSession {
         self.req_id += Wrapping(1);
 
         let community = self.community.clone();
-        Box::new(
-            self.send_and_recv(send_pdu)
-                .and_then(move |buf| handle_response(req_id, &community, buf.into())),
-        )
+        let response = self.send_and_recv(send_pdu).await?;
+        handle_response(req_id, &community, response)
     }
 
-    pub fn getnext(&mut self, name: &[u32]) -> SnmpFuture<SnmpPdu> {
+    pub async fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
@@ -126,18 +125,15 @@ impl AsyncSession {
         self.req_id += Wrapping(1);
 
         let community = self.community.clone();
-        Box::new(
-            self.send_and_recv(send_pdu)
-                .and_then(move |buf| handle_response(req_id, &community, buf.into())),
-        )
+        let buf = self.send_and_recv(send_pdu).await?;
+        handle_response(req_id, &community, buf.into())
     }
-
-    pub fn getbulk(
+    pub async fn getbulk(
         &mut self,
         names: &[&[u32]],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> SnmpFuture<SnmpPdu> {
+    ) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
@@ -153,10 +149,9 @@ impl AsyncSession {
         self.req_id += Wrapping(1);
 
         let community = self.community.clone();
-        Box::new(
-            self.send_and_recv(send_pdu)
-                .and_then(move |buf| handle_response(req_id, &community, buf.into())),
-        )
+
+        let buf = self.send_and_recv(send_pdu).await?;
+        handle_response(req_id, &community, buf.into())
     }
 
     /// # Panics if any of the values are not one of these supported types:
@@ -171,7 +166,7 @@ impl AsyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub fn set(mut self, values: &[(&[u32], Value)]) -> SnmpFuture<SnmpPdu> {
+    pub async fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
@@ -180,18 +175,17 @@ impl AsyncSession {
         self.req_id += Wrapping(1);
 
         let community = self.community.clone();
-        Box::new(self.send_and_recv(send_pdu).and_then(move |buf| {
-            let resp = SnmpPdu::from_bytes(&buf)?;
+        let buf = self.send_and_recv(send_pdu).await?;
+        let resp = SnmpPdu::from_bytes(&buf)?;
 
-            if resp.message_type != SnmpMessageType::Response {
-                Err(SnmpError::AsnWrongType)
-            } else if resp.req_id != req_id {
-                Err(SnmpError::RequestIdMismatch)
-            } else if resp.community != community {
-                Err(SnmpError::CommunityMismatch)
-            } else {
-                Ok(resp)
-            }
-        }))
+        if resp.message_type != SnmpMessageType::Response {
+            Err(SnmpError::AsnWrongType)
+        } else if resp.req_id != req_id {
+            Err(SnmpError::RequestIdMismatch)
+        } else if resp.community != community {
+            Err(SnmpError::CommunityMismatch)
+        } else {
+            Ok(resp)
+        }
     }
 }
