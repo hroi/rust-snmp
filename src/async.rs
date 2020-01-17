@@ -15,7 +15,7 @@ struct AsyncRequest {
 }
 
 impl AsyncRequest {
-    async fn send_and_recv(mut self, pdu: pdu::Buf) -> SnmpResult<Vec<u8>> {
+    async fn send_and_recv(&mut self, pdu: pdu::Buf) -> SnmpResult<Vec<u8>> {
         use tokio::time;
 
         self.socket
@@ -93,7 +93,7 @@ impl AsyncSession {
     async fn send_and_recv(&self, pdu: pdu::Buf) -> SnmpResult<Vec<u8>> {
         match self.new_socket().await {
             Ok(socket) => {
-                let req = AsyncRequest {
+                let mut req = AsyncRequest {
                     socket,
                     timeout: self.timeout,
                 };
@@ -166,7 +166,7 @@ impl AsyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub async fn set(mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+    pub async fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
