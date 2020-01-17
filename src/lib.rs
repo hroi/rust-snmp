@@ -50,7 +50,7 @@
 //! let mut sess = SyncSession::new(agent_addr, community, Some(timeout), 0).unwrap();
 //! let mut response = sess.getnext(sys_descr_oid).unwrap();
 //! if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
-//!     println!("myrouter sysDescr: {}", String::from_utf8_lossy(sys_descr));
+//!     println!("myrouter sysDescr: {}", String::from_utf8_lossy(&sys_descr));
 //! }
 //! ```
 //! ## GET BULK
@@ -78,7 +78,7 @@
 //! use snmp::{SyncSession, Value};
 //!
 //! let syscontact_oid  = &[1,3,6,1,2,1,1,4,0];
-//! let contact         = Value::OctetString(b"Thomas A. Anderson");
+//! let contact         = Value::OctetString(b"Thomas A. Anderson".to_vec());
 //! let agent_addr      = "[2001:db8:f00:b413::abc]:161";
 //! let community       = b"f00b4r";
 //! let timeout         = Duration::from_secs(2);
