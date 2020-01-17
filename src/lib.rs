@@ -121,6 +121,7 @@ pub enum SnmpError {
     AsnUnsupportedType,
     AsnEof,
     AsnIntOverflow,
+    AsnBufferOverflow,
 
     UnsupportedVersion,
     RequestIdMismatch,
@@ -206,7 +207,7 @@ pub mod snmp {
 }
 
 pub mod pdu {
-    use super::{asn1, snmp, Value, BUFFER_SIZE, USIZE_LEN};
+    use super::{asn1, snmp, Value, BUFFER_SIZE, USIZE_LEN, SnmpError, SnmpResult};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -241,43 +242,53 @@ pub mod pdu {
             &mut self.buf[..(BUFFER_SIZE - self.len)]
         }
 
-        fn push_chunk(&mut self, chunk: &[u8]) {
+        fn push_chunk(&mut self, chunk: &[u8]) -> SnmpResult<()> {
+            if self.len + chunk.len() > BUFFER_SIZE {
+                return Err(SnmpError::AsnBufferOverflow);
+            }
             let offset = BUFFER_SIZE - self.len;
             self.buf[(offset - chunk.len())..offset].copy_from_slice(chunk);
             self.len += chunk.len();
+
+            Ok(())
         }
 
-        fn push_byte(&mut self, byte: u8) {
-            self.buf[BUFFER_SIZE - self.len - 1] = byte;
+        fn push_byte(&mut self, byte: u8) -> SnmpResult<()> {
+            *self.buf
+                .get_mut(BUFFER_SIZE - self.len - 1)
+                .ok_or(SnmpError::AsnBufferOverflow)? = byte;
             self.len += 1;
+
+            Ok(())
         }
 
         fn reset(&mut self) {
             self.len = 0;
         }
 
-        fn scribble_bytes<F>(&mut self, mut f: F)
+        fn scribble_bytes<F>(&mut self, mut f: F) -> SnmpResult<()>
         where
-            F: FnMut(&mut [u8]) -> usize,
+            F: FnMut(&mut [u8]) -> SnmpResult<usize>,
         {
-            let scribbled = f(self.available());
+            let scribbled = f(self.available())?;
             self.len += scribbled;
+            Ok(())
         }
 
-        fn push_constructed<F>(&mut self, ident: u8, mut f: F)
+        fn push_constructed<F>(&mut self, ident: u8, mut f: F) -> SnmpResult<()>
         where
-            F: FnMut(&mut Self),
+            F: FnMut(&mut Self) -> SnmpResult<()>,
         {
             let before_len = self.len;
-            f(self);
+            f(self)?;
             let written = self.len - before_len;
-            self.push_length(written);
-            self.push_byte(ident);
+            self.push_length(written)?;
+            self.push_byte(ident)
         }
 
-        fn push_sequence<F>(&mut self, f: F)
+        fn push_sequence<F>(&mut self, f: F) -> SnmpResult<()>
         where
-            F: FnMut(&mut Self),
+            F: FnMut(&mut Self) -> SnmpResult<()>,
         {
             self.push_constructed(asn1::TYPE_SEQUENCE, f)
         }
@@ -288,75 +299,77 @@ pub mod pdu {
         //     self.push_constructed(asn1::TYPE_SET, f)
         // }
 
-        fn push_length(&mut self, len: usize) {
+        fn push_length(&mut self, len: usize) -> SnmpResult<()> {
             if len < 128 {
                 // short form
-                self.push_byte(len as u8);
+                self.push_byte(len as u8)
             } else {
                 // long form
                 let num_leading_nulls = (len.leading_zeros() / 8) as usize;
                 let length_len = mem::size_of::<usize>() - num_leading_nulls;
                 let leading_byte = length_len as u8 | 0b1000_0000;
                 self.scribble_bytes(|o| {
-                    assert!(o.len() > length_len);
+                    if o.len() <= length_len {
+                        return Err(SnmpError::AsnBufferOverflow);
+                    }
                     let bytes = unsafe { mem::transmute::<usize, [u8; USIZE_LEN]>(len.to_be()) };
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
                     o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);
-                    length_len + 1
-                });
+                    Ok(length_len + 1)
+                })
             }
         }
 
-        fn push_integer(&mut self, n: i64) {
-            let len = self.push_i64(n);
-            self.push_length(len);
-            self.push_byte(asn1::TYPE_INTEGER);
+        fn push_integer(&mut self, n: i64) -> SnmpResult<()> {
+            let len = self.push_i64(n)?;
+            self.push_length(len)?;
+            self.push_byte(asn1::TYPE_INTEGER)
         }
 
-        fn push_endofmibview(&mut self) {
-            self.push_chunk(&[snmp::SNMP_ENDOFMIBVIEW, 0]);
+        fn push_endofmibview(&mut self) -> SnmpResult<()> {
+            self.push_chunk(&[snmp::SNMP_ENDOFMIBVIEW, 0])
         }
 
-        fn push_nosuchobject(&mut self) {
-            self.push_chunk(&[snmp::SNMP_NOSUCHOBJECT, 0]);
+        fn push_nosuchobject(&mut self) -> SnmpResult<()> {
+            self.push_chunk(&[snmp::SNMP_NOSUCHOBJECT, 0])
         }
 
-        fn push_nosuchinstance(&mut self) {
-            self.push_chunk(&[snmp::SNMP_NOSUCHINSTANCE, 0]);
+        fn push_nosuchinstance(&mut self) -> SnmpResult<()> {
+            self.push_chunk(&[snmp::SNMP_NOSUCHINSTANCE, 0])
         }
 
-        fn push_counter32(&mut self, n: u32) {
-            let len = self.push_i64(i64::from(n));
-            self.push_length(len);
-            self.push_byte(snmp::TYPE_COUNTER32);
+        fn push_counter32(&mut self, n: u32) -> SnmpResult<()> {
+            let len = self.push_i64(i64::from(n))?;
+            self.push_length(len)?;
+            self.push_byte(snmp::TYPE_COUNTER32)
         }
 
-        fn push_unsigned32(&mut self, n: u32) {
-            let len = self.push_i64(i64::from(n));
-            self.push_length(len);
-            self.push_byte(snmp::TYPE_UNSIGNED32);
+        fn push_unsigned32(&mut self, n: u32) -> SnmpResult<()> {
+            let len = self.push_i64(i64::from(n))?;
+            self.push_length(len)?;
+            self.push_byte(snmp::TYPE_UNSIGNED32)
         }
 
-        fn push_timeticks(&mut self, n: u32) {
-            let len = self.push_i64(i64::from(n));
-            self.push_length(len);
-            self.push_byte(snmp::TYPE_TIMETICKS);
+        fn push_timeticks(&mut self, n: u32) -> SnmpResult<()> {
+            let len = self.push_i64(i64::from(n))?;
+            self.push_length(len)?;
+            self.push_byte(snmp::TYPE_TIMETICKS)
         }
 
-        fn push_opaque(&mut self, bytes: &[u8]) {
-            self.push_chunk(bytes);
-            self.push_length(bytes.len());
-            self.push_byte(snmp::TYPE_OPAQUE);
+        fn push_opaque(&mut self, bytes: &[u8]) -> SnmpResult<()> {
+            self.push_chunk(bytes)?;
+            self.push_length(bytes.len())?;
+            self.push_byte(snmp::TYPE_OPAQUE)
         }
 
-        fn push_counter64(&mut self, n: u64) {
-            let len = self.push_i64(n as i64);
-            self.push_length(len);
-            self.push_byte(snmp::TYPE_COUNTER64);
+        fn push_counter64(&mut self, n: u64) -> SnmpResult<()> {
+            let len = self.push_i64(n as i64)?;
+            self.push_length(len)?;
+            self.push_byte(snmp::TYPE_COUNTER64)
         }
 
-        fn push_i64(&mut self, mut n: i64) -> usize {
+        fn push_i64(&mut self, mut n: i64) -> SnmpResult<usize> {
             let (null, num_null_bytes) = if !n.is_negative() {
                 (0x00u8, (n.leading_zeros() / 8) as usize)
             } else {
@@ -375,7 +388,9 @@ pub mod pdu {
                 if (*(src_ptr.add(mem::size_of::<i64>() - count)) ^ null) > 127u8 {
                     count += 1;
                 }
-                assert!(wbuf.len() >= count);
+                if wbuf.len() < count {
+                     return Err(SnmpError::AsnBufferOverflow);
+                }
                 let offset = (mem::size_of::<i64>() - count) as isize;
                 src_ptr = src_ptr.offset(offset);
                 dst_ptr = dst_ptr.offset(offset);
@@ -383,46 +398,52 @@ pub mod pdu {
                 count
             };
             self.len += count;
-            count
+            Ok(count)
         }
 
-        fn push_boolean(&mut self, boolean: bool) {
-            self.push_byte(boolean as u8);
-            self.push_length(1);
-            self.push_byte(asn1::TYPE_BOOLEAN);
+        fn push_boolean(&mut self, boolean: bool) -> SnmpResult<()> {
+            self.push_byte(boolean as u8)?;
+            self.push_length(1)?;
+            self.push_byte(asn1::TYPE_BOOLEAN)
         }
 
-        fn push_ipaddress(&mut self, ip: [u8; 4]) {
-            self.push_chunk(&ip);
-            self.push_length(ip.len());
-            self.push_byte(snmp::TYPE_IPADDRESS);
+        fn push_ipaddress(&mut self, ip: [u8; 4]) -> SnmpResult<()> {
+            self.push_chunk(&ip)?;
+            self.push_length(ip.len())?;
+            self.push_byte(snmp::TYPE_IPADDRESS)
         }
 
-        fn push_null(&mut self) {
-            self.push_chunk(&[asn1::TYPE_NULL, 0]);
+        fn push_null(&mut self) -> SnmpResult<()> {
+            self.push_chunk(&[asn1::TYPE_NULL, 0])
         }
 
-        fn push_object_identifier_raw(&mut self, input: &[u8]) {
-            self.push_chunk(input);
-            self.push_length(input.len());
-            self.push_byte(asn1::TYPE_OBJECTIDENTIFIER);
+        fn push_object_identifier_raw(&mut self, input: &[u8]) -> SnmpResult<()> {
+            self.push_chunk(input)?;
+            self.push_length(input.len())?;
+            self.push_byte(asn1::TYPE_OBJECTIDENTIFIER)
         }
 
-        fn push_object_identifier(&mut self, input: &[u32]) {
-            assert!(input.len() >= 2);
+        fn push_object_identifier(&mut self, input: &[u32]) -> SnmpResult<()> {
+            if input.len() < 2 {
+                return Err(SnmpError::AsnInvalidLen);
+            }
             let length_before = self.len;
 
             self.scribble_bytes(|output| {
                 let mut pos = output.len() - 1;
                 let (head, tail) = input.split_at(2);
-                assert!(head[0] < 3 && head[1] < 40);
+                if head[0] >= 3 || head[1] >= 40 {
+                    return Err(SnmpError::AsnParseError);
+                }
 
                 // encode the subids in reverse order
                 for subid in tail.iter().rev() {
                     let mut subid = *subid;
                     let mut last_byte = true;
                     loop {
-                        assert_ne!(pos, 0);
+                        if pos == 0 {
+                            return Err(SnmpError::AsnParseError);
+                        }
                         if last_byte {
                             // continue bit is cleared
                             output[pos] = (subid & 0b0111_1111) as u8;
@@ -442,87 +463,92 @@ pub mod pdu {
 
                 // encode the head last
                 output[pos] = (head[0] * 40 + head[1]) as u8;
-                output.len() - pos
-            });
+                Ok(output.len() - pos)
+            })?;
             let length_after = self.len;
-            self.push_length(length_after - length_before);
-            self.push_byte(asn1::TYPE_OBJECTIDENTIFIER);
+            self.push_length(length_after - length_before)?;
+            self.push_byte(asn1::TYPE_OBJECTIDENTIFIER)
         }
 
-        fn push_octet_string(&mut self, bytes: &[u8]) {
-            self.push_chunk(bytes);
-            self.push_length(bytes.len());
-            self.push_byte(asn1::TYPE_OCTETSTRING);
+        fn push_octet_string(&mut self, bytes: &[u8]) -> SnmpResult<()> {
+            self.push_chunk(bytes)?;
+            self.push_length(bytes.len())?;
+            self.push_byte(asn1::TYPE_OCTETSTRING)
         }
     }
 
-    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) {
+    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET, |buf| {
                 buf.push_sequence(|buf| {
                     buf.push_sequence(|buf| {
-                        buf.push_null(); // value
-                        buf.push_object_identifier(name); // name
+                        buf.push_null()?; // value
+                        buf.push_object_identifier(name) // name
                     })
-                });
-                buf.push_integer(0); // error index
-                buf.push_integer(0); // error status
-                buf.push_integer(i64::from(req_id));
-            });
-            buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
-        });
+                })?;
+                buf.push_integer(0)?; // error index
+                buf.push_integer(0)?; // error status
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
     }
 
-    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) {
+    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_NEXT, |buf| {
                 buf.push_sequence(|buf| {
                     buf.push_sequence(|buf| {
-                        buf.push_null(); // value
-                        buf.push_object_identifier(name); // name
+                        buf.push_null()?; // value
+                        buf.push_object_identifier(name) // name
                     })
-                });
-                buf.push_integer(0); // error index
-                buf.push_integer(0); // error status
-                buf.push_integer(i64::from(req_id));
-            });
-            buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
-        });
+                })?;
+                buf.push_integer(0)?; // error index
+                buf.push_integer(0)?; // error status
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
     }
 
-    pub fn build_getbulk(
+    pub fn build_getbulk<T>(
         community: &[u8],
         req_id: i32,
-        names: &[&[u32]],
+        names: &[T],
         non_repeaters: u32,
         max_repetitions: u32,
         buf: &mut Buf,
-    ) {
+    ) -> SnmpResult<()>
+        where T: AsRef<[u32]>,
+    {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_BULK, |buf| {
                 buf.push_sequence(|buf| {
                     for name in names.iter().rev() {
                         buf.push_sequence(|buf| {
-                            buf.push_null(); // value
-                            buf.push_object_identifier(name); // name
-                        });
+                            buf.push_null()?; // value
+                            buf.push_object_identifier(name.as_ref()) // name
+                        })?;
                     }
-                });
-                buf.push_integer(i64::from(max_repetitions));
-                buf.push_integer(i64::from(non_repeaters));
-                buf.push_integer(i64::from(req_id));
-            });
-            buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
-        });
+                    Ok(())
+                })?;
+                buf.push_integer(i64::from(max_repetitions))?;
+                buf.push_integer(i64::from(non_repeaters))?;
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
     }
 
-    pub fn build_set(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+    pub fn build_set<T>(community: &[u8], req_id: i32, values: &[(T, Value)], buf: &mut Buf) -> SnmpResult<()>
+        where T: AsRef<[u32]>,
+    {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_SET, |buf| {
@@ -531,32 +557,33 @@ pub mod pdu {
                         buf.push_sequence(|buf| {
                             use Value::*;
                             match *val {
-                                Boolean(b) => buf.push_boolean(b),
-                                Null => buf.push_null(),
-                                Integer(i) => buf.push_integer(i),
-                                OctetString(ref ostr) => buf.push_octet_string(ostr),
+                                Boolean(b) => buf.push_boolean(b)?,
+                                Null => buf.push_null()?,
+                                Integer(i) => buf.push_integer(i)?,
+                                OctetString(ref ostr) => buf.push_octet_string(ostr)?,
                                 ObjectIdentifier(ref objid) => {
-                                    buf.push_object_identifier_raw(objid.raw())
+                                    buf.push_object_identifier_raw(objid.raw())?
                                 }
-                                IpAddress(ip) => buf.push_ipaddress(ip),
-                                Counter32(i) => buf.push_counter32(i),
-                                Unsigned32(i) => buf.push_unsigned32(i),
-                                Timeticks(tt) => buf.push_timeticks(tt),
-                                Opaque(ref bytes) => buf.push_opaque(bytes),
-                                Counter64(i) => buf.push_counter64(i),
-                                _ => unimplemented!(),
+                                IpAddress(ip) => buf.push_ipaddress(ip)?,
+                                Counter32(i) => buf.push_counter32(i)?,
+                                Unsigned32(i) => buf.push_unsigned32(i)?,
+                                Timeticks(tt) => buf.push_timeticks(tt)?,
+                                Opaque(ref bytes) => buf.push_opaque(bytes)?,
+                                Counter64(i) => buf.push_counter64(i)?,
+                                _ => return Err(SnmpError::AsnUnsupportedType),
                             }
-                            buf.push_object_identifier(name); // name
-                        });
+                            buf.push_object_identifier(name.as_ref()) // name
+                        })?;
                     }
-                });
-                buf.push_integer(0);
-                buf.push_integer(0);
-                buf.push_integer(i64::from(req_id));
-            });
-            buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
-        });
+                    Ok(())
+                })?;
+                buf.push_integer(0)?;
+                buf.push_integer(0)?;
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
     }
 
     pub fn build_response(
@@ -564,7 +591,7 @@ pub mod pdu {
         req_id: i32,
         values: &[(&[u32], Value)],
         buf: &mut Buf,
-    ) {
+    ) -> SnmpResult<()> {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
@@ -589,19 +616,20 @@ pub mod pdu {
                                 EndOfMibView => buf.push_endofmibview(),
                                 NoSuchObject => buf.push_nosuchobject(),
                                 NoSuchInstance => buf.push_nosuchinstance(),
-                                _ => unimplemented!(),
-                            }
-                            buf.push_object_identifier(name); // name
-                        });
+                                _ => return Err(SnmpError::AsnUnsupportedType),
+                            }?;
+                            buf.push_object_identifier(name) // name
+                        })?;
                     }
-                });
-                buf.push_integer(0);
-                buf.push_integer(0);
-                buf.push_integer(i64::from(req_id));
-            });
-            buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
-        });
+                    Ok(())
+                })?;
+                buf.push_integer(0)?;
+                buf.push_integer(0)?;
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
     }
 }
 
