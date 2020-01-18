@@ -107,7 +107,7 @@ impl AsyncSession {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
-        pdu::build_get(&self.community, req_id, name, &mut send_pdu);
+        pdu::build_get(&self.community, req_id, name, &mut send_pdu)?;
 
         self.req_id += Wrapping(1);
 
@@ -120,7 +120,7 @@ impl AsyncSession {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
-        pdu::build_getnext(&self.community, req_id, name, &mut send_pdu);
+        pdu::build_getnext(&self.community, req_id, name, &mut send_pdu)?;
 
         self.req_id += Wrapping(1);
 
@@ -144,7 +144,7 @@ impl AsyncSession {
             non_repeaters,
             max_repetitions,
             &mut send_pdu,
-        );
+        )?;
 
         self.req_id += Wrapping(1);
 
@@ -170,7 +170,7 @@ impl AsyncSession {
         let req_id = self.req_id.0;
 
         let mut send_pdu = pdu::Buf::default();
-        pdu::build_set(&self.community, req_id, values, &mut send_pdu);
+        pdu::build_set(&self.community, req_id, values, &mut send_pdu)?;
 
         self.req_id += Wrapping(1);
 

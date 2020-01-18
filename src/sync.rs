@@ -57,7 +57,7 @@ impl SyncSession {
 
     pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
-        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu);
+        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu)?;
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -66,7 +66,7 @@ impl SyncSession {
 
     pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
-        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu);
+        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu)?;
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -87,7 +87,7 @@ impl SyncSession {
             non_repeaters,
             max_repetitions,
             &mut self.send_pdu,
-        );
+        )?;
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -113,7 +113,7 @@ impl SyncSession {
             req_id,
             values,
             &mut self.send_pdu,
-        );
+        )?;
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
