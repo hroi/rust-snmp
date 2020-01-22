@@ -107,7 +107,7 @@ impl AsyncSession {
     }
 
     pub async fn get(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.fetch_add(1, Ordering::Relaxed);
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_get(&self.community, req_id, name, &mut send_pdu)?;
@@ -118,7 +118,7 @@ impl AsyncSession {
     }
 
     pub async fn getnext(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.fetch_add(1, Ordering::Relaxed);
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_getnext(&self.community, req_id, name, &mut send_pdu)?;
@@ -133,7 +133,7 @@ impl AsyncSession {
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.fetch_add(1, Ordering::Relaxed);
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_getbulk(
@@ -164,7 +164,7 @@ impl AsyncSession {
     ///   - `Opaque`
     ///   - `Counter64`
     pub async fn set(&self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.fetch_add(1, Ordering::Relaxed);
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_set(&self.community, req_id, values, &mut send_pdu)?;
