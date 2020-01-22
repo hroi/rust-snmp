@@ -1,7 +1,10 @@
 use std::{
     io,
     net::{SocketAddr, ToSocketAddrs},
-    num::Wrapping,
+    sync::atomic::{
+        AtomicI32,
+        Ordering
+    },
     time::Duration,
 };
 
@@ -48,7 +51,7 @@ pub struct AsyncSession {
     destination: SocketAddr,
     community: Vec<u8>,
     timeout: Option<Duration>,
-    req_id: Wrapping<i32>,
+    req_id: AtomicI32,
 }
 
 impl AsyncSession {
@@ -71,7 +74,7 @@ impl AsyncSession {
             destination: address,
             community: community.as_ref().into(),
             timeout,
-            req_id: Wrapping(starting_req_id),
+            req_id: AtomicI32::new(starting_req_id),
         })
     }
 
@@ -103,38 +106,34 @@ impl AsyncSession {
         }
     }
 
-    pub async fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
+    pub async fn get(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_get(&self.community, req_id, name, &mut send_pdu)?;
-
-        self.req_id += Wrapping(1);
 
         let community = self.community.clone();
         let response = self.send_and_recv(send_pdu).await?;
         handle_response(req_id, &community, response)
     }
 
-    pub async fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
+    pub async fn getnext(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_getnext(&self.community, req_id, name, &mut send_pdu)?;
-
-        self.req_id += Wrapping(1);
 
         let community = self.community.clone();
         let buf = self.send_and_recv(send_pdu).await?;
         handle_response(req_id, &community, buf.into())
     }
     pub async fn getbulk(
-        &mut self,
+        &self,
         names: &[&[u32]],
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_getbulk(
@@ -145,8 +144,6 @@ impl AsyncSession {
             max_repetitions,
             &mut send_pdu,
         )?;
-
-        self.req_id += Wrapping(1);
 
         let community = self.community.clone();
 
@@ -166,13 +163,11 @@ impl AsyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub async fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
+    pub async fn set(&self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
         pdu::build_set(&self.community, req_id, values, &mut send_pdu)?;
-
-        self.req_id += Wrapping(1);
 
         let community = self.community.clone();
         let buf = self.send_and_recv(send_pdu).await?;
