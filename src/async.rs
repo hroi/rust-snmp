@@ -117,6 +117,22 @@ impl AsyncSession {
         handle_response(req_id, &community, response)
     }
 
+    pub async fn get_multiple<T, I, C>(&self, names: C) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
+    {
+        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
+
+        let mut send_pdu = pdu::Buf::default();
+        pdu::build_get_multiple(self.community.as_slice(), req_id, names, &mut send_pdu)?;
+
+        let community = self.community.clone();
+        let response = self.send_and_recv(send_pdu).await?;
+        handle_response(req_id, &community, response)
+    }
+
     pub async fn getnext(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
@@ -127,12 +143,17 @@ impl AsyncSession {
         let buf = self.send_and_recv(send_pdu).await?;
         handle_response(req_id, &community, buf.into())
     }
-    pub async fn getbulk(
+    pub async fn getbulk<T, I, C>(
         &self,
-        names: &[&[u32]],
+        names: C,
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> SnmpResult<SnmpPdu> {
+    ) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
+    {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
@@ -163,7 +184,12 @@ impl AsyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub async fn set(&self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+    pub async fn set<'a, T, I, C>(&self, values: C) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]> + 'a,
+            I: DoubleEndedIterator<Item=&'a (T, Value)>,
+            C: IntoIterator<IntoIter=I, Item=&'a (T, Value)>
+    {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
