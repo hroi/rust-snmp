@@ -141,7 +141,7 @@ impl AsyncSession {
 
         let community = self.community.clone();
         let buf = self.send_and_recv(send_pdu).await?;
-        handle_response(req_id, &community, buf.into())
+        handle_response(req_id, &community, buf)
     }
     pub async fn getbulk<T, I, C>(
         &self,
@@ -169,7 +169,7 @@ impl AsyncSession {
         let community = self.community.clone();
 
         let buf = self.send_and_recv(send_pdu).await?;
-        handle_response(req_id, &community, buf.into())
+        handle_response(req_id, &community, buf)
     }
 
     /// # Panics if any of the values are not one of these supported types:
