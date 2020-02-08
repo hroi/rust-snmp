@@ -10,10 +10,10 @@ async fn main() {
         let community = b"public";
         let timeout = Duration::from_secs(2);
 
-        let mut session = AsyncSession::new(&agent_addr, community, Some(timeout), 0).unwrap();
+        let session = AsyncSession::new(&agent_addr, community, Some(timeout), 0).unwrap();
 
         let mut response =
-            session.get(sys_descr_oid).await.unwrap();
+            session.get(&[sys_descr_oid]).await.unwrap();
 
         if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
             println!("sysDescr: {}", String::from_utf8_lossy(&sys_descr));

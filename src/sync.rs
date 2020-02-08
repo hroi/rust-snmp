@@ -55,9 +55,11 @@ impl SyncSession {
         }
     }
 
-    pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub fn get<T>(&mut self, names: &[T]) -> SnmpResult<SnmpPdu>
+        where T: AsRef<[u32]>,
+    {
         let req_id = self.req_id.0;
-        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu)?;
+        pdu::build_get(self.community.as_slice(), req_id, names, &mut self.send_pdu)?;
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -73,12 +75,14 @@ impl SyncSession {
         handle_response(req_id, self.community.as_slice(), pdu_bytes.into())
     }
 
-    pub fn getbulk(
+    pub fn getbulk<T>(
         &mut self,
-        names: &[&[u32]],
+        names: &[T],
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> SnmpResult<SnmpPdu> {
+    ) -> SnmpResult<SnmpPdu>
+        where T: AsRef<[u32]>,
+    {
         let req_id = self.req_id.0;
         pdu::build_getbulk(
             self.community.as_slice(),

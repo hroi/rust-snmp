@@ -106,11 +106,16 @@ impl AsyncSession {
         }
     }
 
-    pub async fn get(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub async fn get<T, I, C>(&self, names: C) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
+    {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
-        pdu::build_get(&self.community, req_id, name, &mut send_pdu)?;
+        pdu::build_get(self.community.as_slice(), req_id, names, &mut send_pdu)?;
 
         let community = self.community.clone();
         let response = self.send_and_recv(send_pdu).await?;
@@ -125,14 +130,19 @@ impl AsyncSession {
 
         let community = self.community.clone();
         let buf = self.send_and_recv(send_pdu).await?;
-        handle_response(req_id, &community, buf.into())
+        handle_response(req_id, &community, buf)
     }
-    pub async fn getbulk(
+    pub async fn getbulk<T, I, C>(
         &self,
-        names: &[&[u32]],
+        names: C,
         non_repeaters: u32,
         max_repetitions: u32,
-    ) -> SnmpResult<SnmpPdu> {
+    ) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
+    {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
@@ -148,7 +158,7 @@ impl AsyncSession {
         let community = self.community.clone();
 
         let buf = self.send_and_recv(send_pdu).await?;
-        handle_response(req_id, &community, buf.into())
+        handle_response(req_id, &community, buf)
     }
 
     /// # Panics if any of the values are not one of these supported types:
@@ -163,7 +173,12 @@ impl AsyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub async fn set(&self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+    pub async fn set<'a, T, I, C>(&self, values: C) -> SnmpResult<SnmpPdu>
+        where
+            T: AsRef<[u32]> + 'a,
+            I: DoubleEndedIterator<Item=&'a (T, Value)>,
+            C: IntoIterator<IntoIter=I, Item=&'a (T, Value)>
+    {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();

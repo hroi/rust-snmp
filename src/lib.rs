@@ -275,9 +275,9 @@ pub mod pdu {
             Ok(())
         }
 
-        fn push_constructed<F>(&mut self, ident: u8, mut f: F) -> SnmpResult<()>
+        fn push_constructed<F>(&mut self, ident: u8, f: F) -> SnmpResult<()>
         where
-            F: FnMut(&mut Self) -> SnmpResult<()>,
+            F: FnOnce(&mut Self) -> SnmpResult<()>,
         {
             let before_len = self.len;
             f(self)?;
@@ -288,7 +288,7 @@ pub mod pdu {
 
         fn push_sequence<F>(&mut self, f: F) -> SnmpResult<()>
         where
-            F: FnMut(&mut Self) -> SnmpResult<()>,
+            F: FnOnce(&mut Self) -> SnmpResult<()>,
         {
             self.push_constructed(asn1::TYPE_SEQUENCE, f)
         }
@@ -477,15 +477,28 @@ pub mod pdu {
         }
     }
 
-    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
+    pub fn build_get<T, I, C>(
+        community: &[u8],
+        req_id: i32,
+        names: C,
+        buf: &mut Buf
+    ) -> SnmpResult<()>
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
+    {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET, |buf| {
                 buf.push_sequence(|buf| {
-                    buf.push_sequence(|buf| {
-                        buf.push_null()?; // value
-                        buf.push_object_identifier(name) // name
-                    })
+                    for name in names.into_iter().rev() {
+                        buf.push_sequence(|buf| {
+                            buf.push_null()?; // value
+                            buf.push_object_identifier(name.as_ref()) // name
+                        })?;
+                    }
+                    Ok(())
                 })?;
                 buf.push_integer(0)?; // error index
                 buf.push_integer(0)?; // error status
@@ -515,21 +528,24 @@ pub mod pdu {
         })
     }
 
-    pub fn build_getbulk<T>(
+    pub fn build_getbulk<T, I, C>(
         community: &[u8],
         req_id: i32,
-        names: &[T],
+        names: C,
         non_repeaters: u32,
         max_repetitions: u32,
         buf: &mut Buf,
     ) -> SnmpResult<()>
-        where T: AsRef<[u32]>,
+        where
+            T: AsRef<[u32]>,
+            I: DoubleEndedIterator<Item=T>,
+            C: IntoIterator<IntoIter=I, Item=T>
     {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_BULK, |buf| {
                 buf.push_sequence(|buf| {
-                    for name in names.iter().rev() {
+                    for name in names.into_iter().rev() {
                         buf.push_sequence(|buf| {
                             buf.push_null()?; // value
                             buf.push_object_identifier(name.as_ref()) // name
@@ -546,14 +562,22 @@ pub mod pdu {
         })
     }
 
-    pub fn build_set<T>(community: &[u8], req_id: i32, values: &[(T, Value)], buf: &mut Buf) -> SnmpResult<()>
-        where T: AsRef<[u32]>,
+    pub fn build_set<'a, T, I, C>(
+        community: &[u8],
+        req_id: i32,
+        values: C,
+        buf: &mut Buf
+    ) -> SnmpResult<()>
+        where
+            T: AsRef<[u32]> + 'a,
+            I: DoubleEndedIterator<Item=&'a (T, Value)>,
+            C: IntoIterator<IntoIter=I, Item=&'a (T, Value)>
     {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_SET, |buf| {
                 buf.push_sequence(|buf| {
-                    for &(ref name, ref val) in values.iter().rev() {
+                    for (name, val) in values.into_iter().rev() {
                         buf.push_sequence(|buf| {
                             use Value::*;
                             match *val {
