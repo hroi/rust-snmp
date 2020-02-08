@@ -477,45 +477,7 @@ pub mod pdu {
         }
     }
 
-    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
-        buf.reset();
-        buf.push_sequence(|buf| {
-            buf.push_constructed(snmp::MSG_GET, |buf| {
-                buf.push_sequence(|buf| {
-                    buf.push_sequence(|buf| {
-                        buf.push_null()?; // value
-                        buf.push_object_identifier(name) // name
-                    })
-                })?;
-                buf.push_integer(0)?; // error index
-                buf.push_integer(0)?; // error status
-                buf.push_integer(i64::from(req_id))
-            })?;
-            buf.push_octet_string(community)?;
-            buf.push_integer(snmp::VERSION_2 as i64)
-        })
-    }
-
-    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
-        buf.reset();
-        buf.push_sequence(|buf| {
-            buf.push_constructed(snmp::MSG_GET_NEXT, |buf| {
-                buf.push_sequence(|buf| {
-                    buf.push_sequence(|buf| {
-                        buf.push_null()?; // value
-                        buf.push_object_identifier(name) // name
-                    })
-                })?;
-                buf.push_integer(0)?; // error index
-                buf.push_integer(0)?; // error status
-                buf.push_integer(i64::from(req_id))
-            })?;
-            buf.push_octet_string(community)?;
-            buf.push_integer(snmp::VERSION_2 as i64)
-        })
-    }
-
-    pub fn build_get_multiple<T, I, C>(
+    pub fn build_get<T, I, C>(
         community: &[u8],
         req_id: i32,
         names: C,
@@ -537,6 +499,25 @@ pub mod pdu {
                         })?;
                     }
                     Ok(())
+                })?;
+                buf.push_integer(0)?; // error index
+                buf.push_integer(0)?; // error status
+                buf.push_integer(i64::from(req_id))
+            })?;
+            buf.push_octet_string(community)?;
+            buf.push_integer(snmp::VERSION_2 as i64)
+        })
+    }
+
+    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(snmp::MSG_GET_NEXT, |buf| {
+                buf.push_sequence(|buf| {
+                    buf.push_sequence(|buf| {
+                        buf.push_null()?; // value
+                        buf.push_object_identifier(name) // name
+                    })
                 })?;
                 buf.push_integer(0)?; // error index
                 buf.push_integer(0)?; // error status

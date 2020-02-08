@@ -106,18 +106,7 @@ impl AsyncSession {
         }
     }
 
-    pub async fn get(&self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
-
-        let mut send_pdu = pdu::Buf::default();
-        pdu::build_get(&self.community, req_id, name, &mut send_pdu)?;
-
-        let community = self.community.clone();
-        let response = self.send_and_recv(send_pdu).await?;
-        handle_response(req_id, &community, response)
-    }
-
-    pub async fn get_multiple<T, I, C>(&self, names: C) -> SnmpResult<SnmpPdu>
+    pub async fn get<T, I, C>(&self, names: C) -> SnmpResult<SnmpPdu>
         where
             T: AsRef<[u32]>,
             I: DoubleEndedIterator<Item=T>,
@@ -126,7 +115,7 @@ impl AsyncSession {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
         let mut send_pdu = pdu::Buf::default();
-        pdu::build_get_multiple(self.community.as_slice(), req_id, names, &mut send_pdu)?;
+        pdu::build_get(self.community.as_slice(), req_id, names, &mut send_pdu)?;
 
         let community = self.community.clone();
         let response = self.send_and_recv(send_pdu).await?;
