@@ -1209,7 +1209,7 @@ fn handle_response(req_id: i32, community: &[u8], response: Vec<u8>) -> SnmpResu
 #[derive(Debug)]
 pub struct SnmpPdu {
     version: i64,
-    community: Vec<u8>,
+    pub community: Vec<u8>,
     pub message_type: SnmpMessageType,
     pub req_id: i32,
     pub error_status: u32,
