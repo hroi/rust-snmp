@@ -17,6 +17,7 @@
 //! - SET
 //! - Basic SNMPv2 types
 //! - Synchronous requests
+//! - Async requests
 //! - UDP transport
 //!
 //! Currently does not support:
@@ -24,11 +25,9 @@
 //! - SNMPv1
 //! - SNMPv3
 //! - MIBs
-//! - Async requests
 //! - Transports other than UDP
 //!
 //! ## TODO
-//! - Async requests
 //! - Walking function
 //! - Additional `ObjectIdentifier` utility methods
 //! - Decouple PDU building/parsing from socket handling
@@ -91,17 +90,37 @@
 //!     println!("{} => {:?}", name, val);
 //! }
 //! ```
+//! ## ASYNC GET
+//! ```no_run
+//! use std::time::Duration;
+//! use snmp::{AsyncSession, Value};
+//!
+//! let syscontact_oid  = &[1,3,6,1,4,1,2435,3,3,9,1,6,1,0,];
+//! let agent_addr      = "192.168.88.13:161";
+//! let community       = "public".as_bytes();
+//! let timeout         = Duration::from_secs(2);
+//!
+//! let mut sess = AsyncSession::new(agent_addr, community, Some(timeout), 0).await?;
+//! let response = sess.get(sys_descr_oid).await.unwrap();
+//!
+//! assert_eq!(response.error_status, snmp::snmp::ERRSTATUS_NOERROR);
+//! for (name, val) in response.varbinds {
+//!     println!("{} => {:?}", name, val);
+//! }
+//! ```
 
 #![cfg_attr(feature = "private-tests", feature(test))]
 #![allow(unknown_lints, doc_markdown)]
 
 use std::fmt;
-use std::io;
 use std::mem;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
-use std::num::Wrapping;
 use std::ptr;
-use std::time::Duration;
+
+mod sync_session;
+mod async_session;
+
+pub use sync_session::SyncSession;
+pub use async_session::AsyncSession;
 
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
@@ -1094,135 +1113,6 @@ impl<'a> Iterator for AsnReader<'a> {
         } else {
             None
         }
-    }
-}
-
-/// Synchronous SNMPv2 client.
-pub struct SyncSession {
-    socket: UdpSocket,
-    community: Vec<u8>,
-    req_id: Wrapping<i32>,
-    send_pdu: pdu::Buf,
-    recv_buf: [u8; BUFFER_SIZE],
-}
-
-impl SyncSession {
-    pub fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32) -> io::Result<Self>
-        where SA: ToSocketAddrs
-    {
-        let socket = match destination.to_socket_addrs()?.next() {
-            Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::new(0,0,0,0), 0))?,
-            Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0,0,0,0,0,0,0,0), 0))?,
-            None => panic!("empty list of socket addrs"),
-        };
-        socket.set_read_timeout(timeout)?;
-        socket.connect(destination)?;
-        Ok(SyncSession {
-            socket: socket,
-            community: community.to_vec(),
-            req_id: Wrapping(starting_req_id),
-            send_pdu: pdu::Buf::default(),
-            recv_buf: [0; 4096],
-        })
-    }
-
-    fn send_and_recv(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8]) -> SnmpResult<usize> {
-        if let Ok(_pdu_len) = socket.send(&pdu[..]) {
-            match socket.recv(out) {
-                Ok(len) => Ok(len),
-                Err(_) => Err(SnmpError::ReceiveError)
-            }
-        } else {
-            Err(SnmpError::SendError)
-        }
-    }
-
-    pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
-
-    pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
-
-    pub fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_getbulk(self.community.as_slice(), req_id, names, non_repeaters, max_repetitions, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
-    }
-
-    /// # Panics if any of the values are not one of these supported types:
-    ///   - `Boolean`
-    ///   - `Null`
-    ///   - `Integer`
-    ///   - `OctetString`
-    ///   - `ObjectIdentifier`
-    ///   - `IpAddress`
-    ///   - `Counter32`
-    ///   - `Unsigned32`
-    ///   - `Timeticks`
-    ///   - `Opaque`
-    ///   - `Counter64`
-    pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
-        let req_id = self.req_id.0;
-        pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
-        self.req_id += Wrapping(1);
-        let pdu_bytes = &self.recv_buf[..recv_len];
-        let resp = SnmpPdu::from_bytes(pdu_bytes)?;
-        if resp.message_type != SnmpMessageType::Response {
-            return Err(SnmpError::AsnWrongType);
-        }
-        if resp.req_id != req_id {
-            return Err(SnmpError::RequestIdMismatch);
-        }
-        if resp.community != &self.community[..] {
-            return Err(SnmpError::CommunityMismatch);
-        }
-        Ok(resp)
     }
 }
 

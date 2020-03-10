@@ -1,6 +1,6 @@
 [package]
 name = "snmp"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Hroi Sigurdsson <hroi@asdf.dk>"]
 description = "SNMP client library"
 license = "MIT/Apache-2.0"
@@ -8,3 +8,7 @@ repository = "https://github.com/hroi/rust-snmp"
 documentation = "https://docs.rs/crate/snmp"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
+edition = "2018"
+
+[dependencies.async-std]
+version = "1.0.0"
