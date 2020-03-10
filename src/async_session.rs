@@ -24,7 +24,7 @@ pub struct AsyncSession {
 }
 
 impl AsyncSession {
-    pub async fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32) -> io::Result<Self>
+    pub async fn new<SA>(destination: SA, community: &[u8], starting_req_id: i32) -> io::Result<Self>
         where SA: ToSocketAddrs
     {
         let socket = match destination.to_socket_addrs().await?.next() {

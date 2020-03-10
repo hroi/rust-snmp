@@ -100,7 +100,7 @@
 //! let community       = "public".as_bytes();
 //! let timeout         = Duration::from_secs(2);
 //!
-//! let mut sess = AsyncSession::new(agent_addr, community, Some(timeout), 0).await?;
+//! let mut sess = AsyncSession::new(agent_addr, community, 0).await?;
 //! let response = sess.get(sys_descr_oid).await.unwrap();
 //!
 //! assert_eq!(response.error_status, snmp::snmp::ERRSTATUS_NOERROR);
