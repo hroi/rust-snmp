@@ -181,9 +181,9 @@ pub mod snmp {
     pub const TYPE_OPAQUE: u8 = asn1::CLASS_APPLICATION | 4;
     pub const TYPE_COUNTER64: u8 = asn1::CLASS_APPLICATION | 6;
 
-    pub const SNMP_NOSUCHOBJECT: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
-    pub const SNMP_NOSUCHINSTANCE: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1); /* 81=129 */
-    pub const SNMP_ENDOFMIBVIEW: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
+    pub const SNMP_NOSUCHOBJECT: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0; /* 80=128 */
+    pub const SNMP_NOSUCHINSTANCE: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1; /* 81=129 */
+    pub const SNMP_ENDOFMIBVIEW: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2; /* 82=130 */
 
     pub const ERRSTATUS_NOERROR: u32 = 0;
     pub const ERRSTATUS_TOOBIG: u32 = 1;
@@ -207,7 +207,7 @@ pub mod snmp {
 }
 
 pub mod pdu {
-    use super::{asn1, snmp, Value, BUFFER_SIZE, USIZE_LEN, SnmpError, SnmpResult};
+    use super::{asn1, snmp, SnmpError, SnmpResult, Value, BUFFER_SIZE, USIZE_LEN};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -254,7 +254,8 @@ pub mod pdu {
         }
 
         fn push_byte(&mut self, byte: u8) -> SnmpResult<()> {
-            *self.buf
+            *self
+                .buf
                 .get_mut(BUFFER_SIZE - self.len - 1)
                 .ok_or(SnmpError::AsnBufferOverflow)? = byte;
             self.len += 1;
@@ -389,7 +390,7 @@ pub mod pdu {
                     count += 1;
                 }
                 if wbuf.len() < count {
-                     return Err(SnmpError::AsnBufferOverflow);
+                    return Err(SnmpError::AsnBufferOverflow);
                 }
                 let offset = (mem::size_of::<i64>() - count) as isize;
                 src_ptr = src_ptr.offset(offset);
@@ -481,12 +482,12 @@ pub mod pdu {
         community: &[u8],
         req_id: i32,
         names: C,
-        buf: &mut Buf
+        buf: &mut Buf,
     ) -> SnmpResult<()>
-        where
-            T: AsRef<[u32]>,
-            I: DoubleEndedIterator<Item=T>,
-            C: IntoIterator<IntoIter=I, Item=T>
+    where
+        T: AsRef<[u32]>,
+        I: DoubleEndedIterator<Item = T>,
+        C: IntoIterator<IntoIter = I, Item = T>,
     {
         buf.reset();
         buf.push_sequence(|buf| {
@@ -509,7 +510,12 @@ pub mod pdu {
         })
     }
 
-    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) -> SnmpResult<()> {
+    pub fn build_getnext(
+        community: &[u8],
+        req_id: i32,
+        name: &[u32],
+        buf: &mut Buf,
+    ) -> SnmpResult<()> {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_NEXT, |buf| {
@@ -536,10 +542,10 @@ pub mod pdu {
         max_repetitions: u32,
         buf: &mut Buf,
     ) -> SnmpResult<()>
-        where
-            T: AsRef<[u32]>,
-            I: DoubleEndedIterator<Item=T>,
-            C: IntoIterator<IntoIter=I, Item=T>
+    where
+        T: AsRef<[u32]>,
+        I: DoubleEndedIterator<Item = T>,
+        C: IntoIterator<IntoIter = I, Item = T>,
     {
         buf.reset();
         buf.push_sequence(|buf| {
@@ -566,12 +572,12 @@ pub mod pdu {
         community: &[u8],
         req_id: i32,
         values: C,
-        buf: &mut Buf
+        buf: &mut Buf,
     ) -> SnmpResult<()>
-        where
-            T: AsRef<[u32]> + 'a,
-            I: DoubleEndedIterator<Item=&'a (T, Value)>,
-            C: IntoIterator<IntoIter=I, Item=&'a (T, Value)>
+    where
+        T: AsRef<[u32]> + 'a,
+        I: DoubleEndedIterator<Item = &'a (T, Value)>,
+        C: IntoIterator<IntoIter = I, Item = &'a (T, Value)>,
     {
         buf.reset();
         buf.push_sequence(|buf| {

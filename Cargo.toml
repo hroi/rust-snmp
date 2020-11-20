@@ -11,10 +11,10 @@ keywords = ["networking", "snmp", "monitoring"]
 edition = "2018"
 
 [dependencies]
-tokio = { version = "0.2.4", features = ["udp", "time"], optional = true }
+tokio = { version = "0.2", features = ["udp", "time"], optional = true }
 
 [dev-dependencies]
-tokio = { version = "0.2.4", features = ["udp", "time", "macros", "rt-threaded"] }
+tokio = { version = "0.2", features = ["udp", "time", "macros", "rt-threaded"] }
 
 [features]
 default = ["async"]

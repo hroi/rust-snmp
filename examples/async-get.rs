@@ -12,8 +12,7 @@ async fn main() {
 
         let session = AsyncSession::new(&agent_addr, community, Some(timeout), 0).unwrap();
 
-        let mut response =
-            session.get(&[sys_descr_oid]).await.unwrap();
+        let mut response = session.get(&[sys_descr_oid]).await.unwrap();
 
         if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
             println!("sysDescr: {}", String::from_utf8_lossy(&sys_descr));

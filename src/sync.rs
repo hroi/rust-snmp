@@ -56,7 +56,8 @@ impl SyncSession {
     }
 
     pub fn get<T>(&mut self, names: &[T]) -> SnmpResult<SnmpPdu>
-        where T: AsRef<[u32]>,
+    where
+        T: AsRef<[u32]>,
     {
         let req_id = self.req_id.0;
         pdu::build_get(self.community.as_slice(), req_id, names, &mut self.send_pdu)?;
@@ -81,7 +82,8 @@ impl SyncSession {
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> SnmpResult<SnmpPdu>
-        where T: AsRef<[u32]>,
+    where
+        T: AsRef<[u32]>,
     {
         let req_id = self.req_id.0;
         pdu::build_getbulk(

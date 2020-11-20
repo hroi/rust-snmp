@@ -1,16 +1,15 @@
 use std::{
     io,
     net::{SocketAddr, ToSocketAddrs},
-    sync::atomic::{
-        AtomicI32,
-        Ordering
-    },
+    sync::atomic::{AtomicI32, Ordering},
     time::Duration,
 };
 
 use tokio::net::UdpSocket;
 
-use crate::{handle_response, pdu, SnmpError, SnmpResult, SnmpMessageType, SnmpPdu, Value, BUFFER_SIZE};
+use crate::{
+    handle_response, pdu, SnmpError, SnmpMessageType, SnmpPdu, SnmpResult, Value, BUFFER_SIZE,
+};
 
 struct AsyncRequest {
     socket: UdpSocket,
@@ -28,21 +27,16 @@ impl AsyncRequest {
 
         let mut buf = [0; BUFFER_SIZE];
 
-        let fut = self.socket
-            .recv(&mut buf);
+        let fut = self.socket.recv(&mut buf);
 
         match self.timeout {
-            Some(timeout) => {
-                time::timeout(timeout, fut)
+            Some(timeout) => time::timeout(timeout, fut)
                 .await
-                .map_err(|_| SnmpError::ReceiveError)?
-            },
-            None => {
-                fut.await
-            },
+                .map_err(|_| SnmpError::ReceiveError)?,
+            None => fut.await,
         }
-            .map_err(|_| SnmpError::ReceiveError)
-            .map(|size| buf[0..size].into())
+        .map_err(|_| SnmpError::ReceiveError)
+        .map(|size| buf[0..size].into())
     }
 }
 
@@ -85,11 +79,8 @@ impl AsyncSession {
             "[::]:0".parse().unwrap()
         };
 
-        let socket = UdpSocket::bind(&addr_to_bind)
-            .await?;
-        socket
-            .connect(&self.destination)
-            .await?;
+        let socket = UdpSocket::bind(&addr_to_bind).await?;
+        socket.connect(&self.destination).await?;
         Ok(socket)
     }
 
@@ -107,10 +98,10 @@ impl AsyncSession {
     }
 
     pub async fn get<T, I, C>(&self, names: C) -> SnmpResult<SnmpPdu>
-        where
-            T: AsRef<[u32]>,
-            I: DoubleEndedIterator<Item=T>,
-            C: IntoIterator<IntoIter=I, Item=T>
+    where
+        T: AsRef<[u32]>,
+        I: DoubleEndedIterator<Item = T>,
+        C: IntoIterator<IntoIter = I, Item = T>,
     {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
@@ -138,10 +129,10 @@ impl AsyncSession {
         non_repeaters: u32,
         max_repetitions: u32,
     ) -> SnmpResult<SnmpPdu>
-        where
-            T: AsRef<[u32]>,
-            I: DoubleEndedIterator<Item=T>,
-            C: IntoIterator<IntoIter=I, Item=T>
+    where
+        T: AsRef<[u32]>,
+        I: DoubleEndedIterator<Item = T>,
+        C: IntoIterator<IntoIter = I, Item = T>,
     {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
@@ -174,10 +165,10 @@ impl AsyncSession {
     ///   - `Opaque`
     ///   - `Counter64`
     pub async fn set<'a, T, I, C>(&self, values: C) -> SnmpResult<SnmpPdu>
-        where
-            T: AsRef<[u32]> + 'a,
-            I: DoubleEndedIterator<Item=&'a (T, Value)>,
-            C: IntoIterator<IntoIter=I, Item=&'a (T, Value)>
+    where
+        T: AsRef<[u32]> + 'a,
+        I: DoubleEndedIterator<Item = &'a (T, Value)>,
+        C: IntoIterator<IntoIter = I, Item = &'a (T, Value)>,
     {
         let req_id = self.req_id.fetch_add(1, Ordering::SeqCst);
 
