@@ -9,6 +9,39 @@ use crate::{
     handle_response, pdu, SnmpError, SnmpMessageType, SnmpPdu, SnmpResult, Value, BUFFER_SIZE,
 };
 
+/// Builder for synchronous SNMPv2 client
+pub struct SyncSessionBuilder<A, S> {
+    destination: A,
+    community: Option<S>,
+    timeout: Option<Duration>,
+    req_id: i32,
+}
+
+impl<A, S> SyncSessionBuilder<A, S>
+where
+    A: ToSocketAddrs,
+    S: AsRef<[u8]>,
+{
+    pub fn community(mut self, community: S) -> Self {
+        self.community = Some(community);
+        self
+    }
+
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn req_id(mut self, req_id: i32) -> Self {
+        self.req_id = req_id;
+        self
+    }
+
+    pub fn build(self) -> io::Result<SyncSession> {
+        SyncSession::new(self.destination, self.community, self.timeout, self.req_id)
+    }
+}
+
 /// Synchronous SNMPv2 client.
 pub struct SyncSession {
     socket: UdpSocket,
@@ -19,25 +52,44 @@ pub struct SyncSession {
 }
 
 impl SyncSession {
-    pub fn new<SA>(
+    pub fn builder<A, S>(destination: A) -> SyncSessionBuilder<A, S>
+    where
+        S: AsRef<[u8]>,
+    {
+        SyncSessionBuilder {
+            destination,
+            community: None,
+            timeout: None,
+            req_id: 0,
+        }
+    }
+
+    fn new<SA, T>(
         destination: SA,
-        community: &[u8],
+        community: Option<T>,
         timeout: Option<Duration>,
         starting_req_id: i32,
     ) -> io::Result<Self>
     where
         SA: ToSocketAddrs,
+        T: AsRef<[u8]>,
     {
         let socket = match destination.to_socket_addrs()?.next() {
             Some(SocketAddr::V4(_)) => UdpSocket::bind((Ipv4Addr::new(0, 0, 0, 0), 0))?,
             Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0), 0))?,
             None => panic!("empty list of socket addrs"),
         };
+
         socket.set_read_timeout(timeout)?;
         socket.connect(destination)?;
+
+        let community = community
+            .map(|c| c.as_ref().into())
+            .unwrap_or_else(|| b"public".to_vec());
+
         Ok(SyncSession {
             socket,
-            community: community.to_vec(),
+            community,
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
             recv_buf: [0; 4096],

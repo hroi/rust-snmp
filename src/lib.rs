@@ -47,7 +47,11 @@
 //! let community     = b"f00b4r";
 //! let timeout       = Duration::from_secs(2);
 //!
-//! let mut sess = SyncSession::new(agent_addr, community, Some(timeout), 0).unwrap();
+//! let mut sess = SyncSession::builder(agent_addr)
+//!     .community(community)
+//!     .timeout(timeout)
+//!     .build()
+//!     .unwrap();
 //! let mut response = sess.getnext(sys_descr_oid).unwrap();
 //! if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
 //!     println!("myrouter sysDescr: {}", String::from_utf8_lossy(&sys_descr));
@@ -65,7 +69,11 @@
 //! let non_repeaters   = 0;
 //! let max_repetitions = 7; // number of items in "system" OID
 //!
-//! let mut sess = SyncSession::new(agent_addr, community, Some(timeout), 0).unwrap();
+//! let mut sess = SyncSession::builder(agent_addr)
+//!     .community(community)
+//!     .timeout(timeout)
+//!     .build()
+//!     .unwrap();
 //! let response = sess.getbulk(&[system_oid], non_repeaters, max_repetitions).unwrap();
 //!
 //! for (name, val) in response.varbinds {
@@ -83,7 +91,11 @@
 //! let community       = b"f00b4r";
 //! let timeout         = Duration::from_secs(2);
 //!
-//! let mut sess = SyncSession::new(agent_addr, community, Some(timeout), 0).unwrap();
+//! let mut sess = SyncSession::builder(agent_addr)
+//!     .community(community)
+//!     .timeout(timeout)
+//!     .build()
+//!     .unwrap();
 //! let response = sess.set(&[(syscontact_oid, contact)]).unwrap();
 //!
 //! assert_eq!(response.error_status, snmp::snmp::ERRSTATUS_NOERROR);
@@ -207,7 +219,7 @@ pub mod snmp {
 }
 
 pub mod pdu {
-    use super::{asn1, snmp, SnmpError, SnmpResult, Value, BUFFER_SIZE, USIZE_LEN};
+    use super::{asn1, snmp, SnmpError, SnmpResult, Value, BUFFER_SIZE};
     use std::{fmt, mem, ops, ptr};
 
     pub struct Buf {
@@ -313,7 +325,7 @@ pub mod pdu {
                     if o.len() <= length_len {
                         return Err(SnmpError::AsnBufferOverflow);
                     }
-                    let bytes = unsafe { mem::transmute::<usize, [u8; USIZE_LEN]>(len.to_be()) };
+                    let bytes = len.to_be_bytes();
                     let write_offset = o.len() - length_len - 1;
                     o[write_offset] = leading_byte;
                     o[write_offset + 1..].copy_from_slice(&bytes[num_leading_nulls..]);

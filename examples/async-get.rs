@@ -10,7 +10,11 @@ async fn main() {
         let community = b"public";
         let timeout = Duration::from_secs(2);
 
-        let session = AsyncSession::new(&agent_addr, community, Some(timeout), 0).unwrap();
+        let session = AsyncSession::builder(&agent_addr)
+            .community(community)
+            .timeout(timeout)
+            .build()
+            .unwrap();
 
         let mut response = session.get(&[sys_descr_oid]).await.unwrap();
 
