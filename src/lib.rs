@@ -157,8 +157,10 @@ pub mod snmp {
     #![allow(dead_code, identity_op, eq_op)]
 
     use super::asn1;
-
+    pub const VERSION_1:    i64 = 0;
     pub const VERSION_2:    i64 = 1;
+    
+    
 
     pub const MSG_GET:      u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 0;
     pub const MSG_GET_NEXT: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::CONSTRUCTED | 1;
@@ -458,7 +460,7 @@ pub mod pdu {
         }
     }
 
-    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) {
+    pub fn build_get(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf, version:i32) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET, |buf| {
@@ -473,11 +475,18 @@ pub mod pdu {
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
+            push_version(buf, version) ;
+            
         });
     }
-
-    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf) {
+    fn push_version(buf: &mut Buf, version:i32) {
+        match version {
+            1 => buf.push_integer(snmp::VERSION_1 as i64),
+            2 => buf.push_integer(snmp::VERSION_2 as i64),
+            _ => buf.push_integer(snmp::VERSION_1 as i64),
+        }
+    }
+    pub fn build_getnext(community: &[u8], req_id: i32, name: &[u32], buf: &mut Buf, version:i32) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_GET_NEXT, |buf| {
@@ -492,7 +501,7 @@ pub mod pdu {
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
+            push_version(buf, version) ;
         });
     }
 
@@ -514,11 +523,11 @@ pub mod pdu {
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
+            buf.push_integer(snmp::VERSION_2 as i64)
         });
     }
 
-    pub fn build_set(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+    pub fn build_set(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf, version:i32) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_SET, |buf| {
@@ -549,11 +558,11 @@ pub mod pdu {
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
+            push_version(buf, version) ;
         });
     }
 
-    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf) {
+    pub fn build_response(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf, version:i32) {
         buf.reset();
         buf.push_sequence(|buf| {
             buf.push_constructed(snmp::MSG_RESPONSE, |buf| {
@@ -587,7 +596,7 @@ pub mod pdu {
                 buf.push_integer(req_id as i64);
             });
             buf.push_octet_string(community);
-            buf.push_integer(snmp::VERSION_2 as i64);
+            push_version(buf, version) ;
         });
     }
 }
@@ -1100,6 +1109,7 @@ impl<'a> Iterator for AsnReader<'a> {
 /// Synchronous SNMPv2 client.
 pub struct SyncSession {
     socket: UdpSocket,
+    version:i32,
     community: Vec<u8>,
     req_id: Wrapping<i32>,
     send_pdu: pdu::Buf,
@@ -1107,7 +1117,7 @@ pub struct SyncSession {
 }
 
 impl SyncSession {
-    pub fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32) -> io::Result<Self>
+    pub fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32, version:i32) -> io::Result<Self>
         where SA: ToSocketAddrs
     {
         let socket = match destination.to_socket_addrs()?.next() {
@@ -1123,6 +1133,7 @@ impl SyncSession {
             req_id: Wrapping(starting_req_id),
             send_pdu: pdu::Buf::default(),
             recv_buf: [0; 4096],
+            version
         })
     }
 
@@ -1139,7 +1150,7 @@ impl SyncSession {
 
     pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
-        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu);
+        pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -1158,7 +1169,7 @@ impl SyncSession {
 
     pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
-        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu);
+        pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -1208,7 +1219,7 @@ impl SyncSession {
     ///   - `Counter64`
     pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
-        pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu);
+        pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu, self.version);
         let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
@@ -1242,7 +1253,7 @@ impl<'a> SnmpPdu<'a> {
         let seq = AsnReader::from_bytes(bytes).read_raw(asn1::TYPE_SEQUENCE)?;
         let mut rdr = AsnReader::from_bytes(seq);
         let version = rdr.read_asn_integer()?;
-        if version != snmp::VERSION_2 {
+        if version > 1 || version < 0 {
             return Err(SnmpError::UnsupportedVersion);
         }
         let community = rdr.read_asn_octetstring()?;
