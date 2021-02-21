@@ -1239,8 +1239,8 @@ impl SyncSession {
 
 #[derive(Debug)]
 pub struct SnmpPdu<'a> {
-    version: i64,
-    community: &'a [u8],
+    pub version: i64,
+    pub community: &'a [u8],
     pub message_type: SnmpMessageType,
     pub req_id: i32,
     pub error_status: u32,
