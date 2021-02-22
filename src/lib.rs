@@ -103,6 +103,8 @@ use std::num::Wrapping;
 use std::ptr;
 use std::time::Duration;
 
+
+
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width="64")]
@@ -1148,10 +1150,18 @@ impl SyncSession {
         }
     }
 
-    pub fn get(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub fn send_and_recv_repeat(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8], repeat:u32) -> SnmpResult<usize> {
+        let res = (0..repeat).filter_map(|_| Self::send_and_recv(socket, pdu, out).ok() ).next() ;
+        match res {
+           Some(x) => Ok(x),
+           None => Err(SnmpError::ReceiveError)
+        }
+    }
+
+    pub fn get(&mut self, name: &[u32], repeat:u32) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
+        let recv_len = Self::send_and_recv_repeat(&self.socket, &self.send_pdu, &mut self.recv_buf[..],repeat)?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
@@ -1167,10 +1177,10 @@ impl SyncSession {
         Ok(resp)
     }
 
-    pub fn getnext(&mut self, name: &[u32]) -> SnmpResult<SnmpPdu> {
+    pub fn getnext(&mut self, name: &[u32], repeat:u32) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
+        let recv_len = Self::send_and_recv_repeat(&self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat)?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
@@ -1185,7 +1195,11 @@ impl SyncSession {
         }
         Ok(resp)
     }
-
+    /*
+    pub fn get_next_repeat(&mut self, name: &[u32], rep:usize) -> Option<SnmpPdu<'_>> {
+        (0..rep).filter_map(|_| self.getnext(name).ok() ).next()
+    }
+    */
     pub fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_getbulk(self.community.as_slice(), req_id, names, non_repeaters, max_repetitions, &mut self.send_pdu);
@@ -1217,10 +1231,10 @@ impl SyncSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub fn set(&mut self, values: &[(&[u32], Value)]) -> SnmpResult<SnmpPdu> {
+    pub fn set(&mut self, values: &[(&[u32], Value)], repeat:u32) -> SnmpResult<SnmpPdu> {
         let req_id = self.req_id.0;
         pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv(&self.socket, &self.send_pdu, &mut self.recv_buf[..])?;
+        let recv_len = Self::send_and_recv_repeat(&self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat)?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
