@@ -1033,24 +1033,7 @@ pub enum Value<'a> {
     SnmpTrap(AsnReader<'a>),
     SnmpReport(AsnReader<'a>),
 }
-impl<'a> Value<'a>  {
-    pub fn get_the_tag(&self) -> u8 {
-        match *self {
-            Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
-            Value::Integer(_n) => asn1::TYPE_INTEGER,
-            Value::OctetString(_slice)  => asn1::TYPE_OCTETSTRING,
-            Value::ObjectIdentifier(ref _obj_id) => asn1::TYPE_OBJECTIDENTIFIER,
-            Value::Null              => asn1::TYPE_NULL,
-            Value::IpAddress(_val)               => snmp::TYPE_IPADDRESS ,
-            Value::Counter32(_val)               => snmp::TYPE_COUNTER32,
-            Value::Unsigned32(_val)              => snmp::TYPE_UNSIGNED32,
-            Value::Timeticks(_val)               => snmp::TYPE_TIMETICKS,
-            Value::Opaque(_val)                  => snmp::TYPE_OPAQUE,
-            Value::Counter64(_val)               => snmp::TYPE_COUNTER64,
-            _ => asn1::TYPE_INTEGER,
-        }
-    }
-}
+
 impl<'a>  fmt::Display for Value<'a>  {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Value::*;
@@ -1441,4 +1424,22 @@ pub fn get_oid_array(oid:&str) -> Vec<u32> {
 
 pub fn get_str_from_oid_arr(arr: &[u32]) -> String {
     arr.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(".")
+}
+
+
+pub fn get_the_tag(value:&Value) -> u8 {
+    match value {
+        Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
+        Value::Integer(_n) => asn1::TYPE_INTEGER,
+        Value::OctetString(_slice)  => asn1::TYPE_OCTETSTRING,
+        Value::ObjectIdentifier(ref _obj_id) => asn1::TYPE_OBJECTIDENTIFIER,
+        Value::Null              => asn1::TYPE_NULL,
+        Value::IpAddress(_val)               => snmp::TYPE_IPADDRESS ,
+        Value::Counter32(_val)               => snmp::TYPE_COUNTER32,
+        Value::Unsigned32(_val)              => snmp::TYPE_UNSIGNED32,
+        Value::Timeticks(_val)               => snmp::TYPE_TIMETICKS,
+        Value::Opaque(_val)                  => snmp::TYPE_OPAQUE,
+        Value::Counter64(_val)               => snmp::TYPE_COUNTER64,
+        _ => asn1::TYPE_INTEGER,
+    }
 }
