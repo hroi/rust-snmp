@@ -104,7 +104,6 @@ use std::ptr;
 use std::time::Duration;
 
 
-
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width="64")]
@@ -717,6 +716,8 @@ impl<'a> ObjectIdentifier<'a> {
     pub fn raw(&self) -> &'a [u8] {
         self.inner
     }
+
+    
 }
 
 /// ASN.1/DER decoder iterator.
@@ -1032,7 +1033,60 @@ pub enum Value<'a> {
     SnmpTrap(AsnReader<'a>),
     SnmpReport(AsnReader<'a>),
 }
+impl<'a> Value<'a>  {
+    fn get_the_tag(&self) -> u8 {
+        match *self {
+            Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
+            Value::Integer(_n) => asn1::TYPE_INTEGER,
+            Value::OctetString(_slice)  => asn1::TYPE_OCTETSTRING,
+            Value::ObjectIdentifier(ref _obj_id) => asn1::TYPE_OBJECTIDENTIFIER,
+            Value::Null              => asn1::TYPE_NULL,
+            Value::IpAddress(_val)               => snmp::TYPE_IPADDRESS ,
+            Value::Counter32(_val)               => snmp::TYPE_COUNTER32,
+            Value::Unsigned32(_val)              => snmp::TYPE_UNSIGNED32,
+            Value::Timeticks(_val)               => snmp::TYPE_TIMETICKS,
+            Value::Opaque(_val)                  => snmp::TYPE_OPAQUE,
+            Value::Counter64(_val)               => snmp::TYPE_COUNTER64,
+            _ => asn1::TYPE_INTEGER,
+        }
+    }
+}
+impl<'a>  fmt::Display for Value<'a>  {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use Value::*;
+        match *self {
+            Boolean(v)                   => write!(f, "{}", v),
+            Integer(n)                   => write!(f, "{}",n),
+            OctetString(slice)           => write!(f, "{}", String::from_utf8_lossy(slice)),
+            ObjectIdentifier(ref obj_id) => write!(f, "{}",  obj_id),
+            Null                         => write!(f, "NULL"),
+            Sequence(ref val)            => write!(f, "{:#?}",val),
+            Set(ref val)                 => write!(f, "{:?}", val),
+            Constructed(ident, ref val)  => write!(f, "{}|{:#?}", ident, val),
 
+            IpAddress(val)               => write!(f, "{}.{}.{}.{}",val[0], val[1], val[2], val[3]),
+            Counter32(val)               => write!(f, "{}",  val),
+            Unsigned32(val)              => write!(f, "{}", val),
+            Timeticks(val)               => write!(f, "{}", val),
+            Opaque(val)                  => write!(f, "{:?}",val),
+            Counter64(val)               => write!(f, "{}",val),
+
+            EndOfMibView                 => write!(f, "END OF MIB VIEW"),
+            NoSuchObject                 => write!(f, "NO SUCH OBJECT"),
+            NoSuchInstance               => write!(f, "NO SUCH INSTANCE"),
+
+            SnmpGetRequest(ref val)      => write!(f, "SNMP GET REQUEST: {:#?}", val),
+            SnmpGetNextRequest(ref val)  => write!(f, "SNMP GET NEXT REQUEST: {:#?}", val),
+            SnmpGetBulkRequest(ref val)  => write!(f, "SNMP GET BULK REQUEST: {:#?}", val),
+            SnmpResponse(ref val)        => write!(f, "SNMP RESPONSE: {:#?}", val),
+            SnmpSetRequest(ref val)      => write!(f, "SNMP SET REQUEST: {:#?}", val),
+            SnmpInformRequest(ref val)   => write!(f, "SNMP INFORM REQUEST: {:#?}", val),
+            SnmpTrap(ref val)            => write!(f, "SNMP TRAP: {:#?}", val),
+            SnmpReport(ref val)          => write!(f, "SNMP REPORT: {:#?}", val),
+        }
+    }
+    
+}
 impl<'a> fmt::Debug for Value<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Value::*;
@@ -1249,6 +1303,8 @@ impl SyncSession {
         }
         Ok(resp)
     }
+
+    
 }
 
 #[derive(Debug)]
@@ -1374,4 +1430,15 @@ impl<'a> Iterator for Varbinds<'a> {
         }
         None
     }
+}
+
+
+pub fn get_oid_array(oid:&str) -> Vec<u32> { 
+    // to comvert to a slice add as_slice()
+    oid.split('.').collect::<Vec<&str>>().iter().map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<u32>>()
+    
+}
+
+pub fn get_str_from_oid_arr(arr: &[u32]) -> String {
+    arr.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(".")
 }

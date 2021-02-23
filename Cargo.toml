@@ -8,3 +8,4 @@ repository = "https://github.com/hroi/rust-snmp"
 documentation = "https://docs.rs/crate/snmp"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
+
