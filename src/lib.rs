@@ -1034,7 +1034,7 @@ pub enum Value<'a> {
     SnmpReport(AsnReader<'a>),
 }
 impl<'a> Value<'a>  {
-    fn get_the_tag(&self) -> u8 {
+    pub fn get_the_tag(&self) -> u8 {
         match *self {
             Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
             Value::Integer(_n) => asn1::TYPE_INTEGER,
