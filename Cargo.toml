@@ -9,3 +9,6 @@ documentation = "https://docs.rs/crate/snmp"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
 
+
+[dependencies]
+serde = { version = "1.0.123", features = ["derive"] }

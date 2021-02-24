@@ -94,7 +94,7 @@
 
 #![cfg_attr(feature = "private-tests", feature(test))]
 #![allow(unknown_lints, doc_markdown)]
-
+extern crate serde;
 use std::fmt;
 use std::io;
 use std::mem;
@@ -102,7 +102,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::num::Wrapping;
 use std::ptr;
 use std::time::Duration;
-
+use serde::{Serialize, Deserialize};
 
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
@@ -619,7 +619,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
 }
 
 /// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
-#[derive(PartialEq)]
+#[derive(PartialEq, Serialize, Deserialize)]
 pub struct ObjectIdentifier<'a> {
     inner: &'a [u8],
 }
@@ -731,6 +731,7 @@ impl<'a> ObjectIdentifier<'a> {
 /// - extended tag IDs.
 /// - indefinite lengths (disallowed by DER).
 /// - INTEGER values not representable by i64.
+#[derive(Serialize, Deserialize)]
 pub struct AsnReader<'a> {
     inner: &'a [u8],
 }
@@ -1002,7 +1003,7 @@ impl<'a> AsnReader<'a> {
 
 }
 
-
+#[derive(Serialize, Deserialize)]
 pub enum Value<'a> {
     Boolean(bool),
     Null,
