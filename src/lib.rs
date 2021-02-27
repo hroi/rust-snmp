@@ -619,7 +619,7 @@ fn decode_i64(i: &[u8]) -> SnmpResult<i64> {
 }
 
 /// Wrapper around raw bytes representing an ASN.1 OBJECT IDENTIFIER.
-#[derive(PartialEq, Serialize, Deserialize, Clone)]
+#[derive(PartialEq, Serialize, Deserialize, Clone, Copy)]
 pub struct ObjectIdentifier<'a> {
     inner: &'a [u8],
 }
@@ -731,7 +731,7 @@ impl<'a> ObjectIdentifier<'a> {
 /// - extended tag IDs.
 /// - indefinite lengths (disallowed by DER).
 /// - INTEGER values not representable by i64.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy)]
 pub struct AsnReader<'a> {
     inner: &'a [u8],
 }
@@ -1003,7 +1003,7 @@ impl<'a> AsnReader<'a> {
 
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub enum Value<'a> {
     Boolean(bool),
     Null,
