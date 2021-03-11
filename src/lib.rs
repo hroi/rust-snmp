@@ -95,7 +95,9 @@
 #![cfg_attr(feature = "private-tests", feature(test))]
 #![allow(unknown_lints, doc_markdown)]
 extern crate serde;
+use std::num::ParseIntError;
 use std::fmt;
+use std::str::FromStr;
 use std::io;
 use std::mem;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -128,6 +130,26 @@ pub enum SnmpError {
 
     SendError,
     ReceiveError,
+}
+impl fmt::Display for SnmpError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let err_msg = match self {
+            SnmpError::AsnParseError   => "ASN Parse Error",
+            SnmpError::AsnInvalidLen  => "ASN Invalid length",
+            SnmpError::AsnWrongType   => "Wrong ASN Type",
+            SnmpError::AsnUnsupportedType => "UnSupported ASN Type",
+            SnmpError::AsnEof => "End of ASN ",
+            SnmpError::AsnIntOverflow => "ASN Overflow",
+            SnmpError::UnsupportedVersion => "Unsupported Snmp Version",
+            SnmpError::RequestIdMismatch => "SNMP Request ID mismatch",
+            SnmpError::CommunityMismatch => "Community mismatch",
+            SnmpError::ValueOutOfRange => "Value out of range",
+            SnmpError::SendError => "Snmp PDU Send Error",
+            SnmpError::ReceiveError => "Snmp Receive Error",
+            
+        };
+        write!(f, "{}", err_msg)
+    }
 }
 
 type SnmpResult<T> = Result<T, SnmpError>;
@@ -180,9 +202,9 @@ pub mod snmp {
     pub const TYPE_OPAQUE:     u8 = asn1::CLASS_APPLICATION | 4;
     pub const TYPE_COUNTER64:  u8 = asn1::CLASS_APPLICATION | 6;
 
-    pub const SNMP_NOSUCHOBJECT:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0); /* 80=128 */
-    pub const SNMP_NOSUCHINSTANCE: u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1); /* 81=129 */
-    pub const SNMP_ENDOFMIBVIEW:   u8 = (asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2); /* 82=130 */
+    pub const SNMP_NOSUCHOBJECT:   u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x0; /* 80=128 */
+    pub const SNMP_NOSUCHINSTANCE: u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x1; /* 81=129 */
+    pub const SNMP_ENDOFMIBVIEW:   u8 = asn1::CLASS_CONTEXTSPECIFIC | asn1::PRIMITIVE | 0x2; /* 82=130 */
 
     pub const ERRSTATUS_NOERROR:             u32 =  0;
     pub const ERRSTATUS_TOOBIG:              u32 =  1;
@@ -413,7 +435,7 @@ pub mod pdu {
             self.push_byte(asn1::TYPE_OBJECTIDENTIFIER);
         }
 
-        fn push_object_identifier(&mut self, input: &[u32]) {
+        pub fn push_object_identifier(&mut self, input: &[u32]) {
             assert!(input.len() >= 2);
             let length_before = self.len;
 
@@ -675,6 +697,12 @@ impl<'a> ObjectIdentifier<'a> {
         ObjectIdentifier {
             inner: bytes,
         }
+    }
+    pub fn from_str<'b>(s: &str, buf:&'b mut pdu::Buf) -> ObjectIdentifier<'b> {
+       // let mut buf = pdu::Buf::default() ; create this out side the fucntion 
+        buf.push_object_identifier(get_oid_array(s).as_slice()) ;
+        let mut reader = AsnReader::from_bytes(&*buf);
+        reader.read_asn_objectidentifier().unwrap() 
     }
 
     /// Reads out the OBJECT IDENTIFIER sub-IDs as a slice of u32s.
@@ -1034,7 +1062,26 @@ pub enum Value<'a> {
     SnmpTrap(AsnReader<'a>),
     SnmpReport(AsnReader<'a>),
 }
-
+impl<'a>  Value<'a> {
+    pub fn from_tag_value(tag:u8, value:&'a str) -> Self {
+        match tag {
+            asn1::TYPE_BOOLEAN          => Value::Boolean(value.parse::<bool>().unwrap()),
+            asn1::TYPE_NULL             => Value::Null,
+            asn1::TYPE_INTEGER          => Value::Integer(value.parse::<i64>().unwrap()),
+            asn1::TYPE_OCTETSTRING      => Value::OctetString(value.as_bytes()),
+          //  asn1::TYPE_OBJECTIDENTIFIER => Value::ObjectIdentifier(ObjectIdentifier::from_str(value,pdu::Buf::default()),
+          //  asn1::TYPE_SEQUENCE         => self.read_raw(ident).map(|v| Sequence(AsnReader::from_bytes(v))),
+          //      asn1::TYPE_SET              => self.read_raw(ident).map(|v| Set(AsnReader::from_bytes(v))),
+            snmp::TYPE_IPADDRESS        => Value::IpAddress(get_ip_addr(value)),
+            snmp::TYPE_COUNTER32        => Value::Counter32(value.parse::<u32>().unwrap()),
+            snmp::TYPE_UNSIGNED32       => Value::Unsigned32(value.parse::<u32>().unwrap()),
+            snmp::TYPE_TIMETICKS        => Value::Timeticks(value.parse::<u32>().unwrap()),
+            snmp::TYPE_OPAQUE           => Value::Opaque(value.as_bytes()),
+            snmp::TYPE_COUNTER64        => Value::Counter64(value.parse::<u64>().unwrap()),
+            _ => Value::Integer(value.parse::<i64>().unwrap()),
+        }
+    }
+}
 impl<'a>  fmt::Display for Value<'a>  {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use Value::*;
@@ -1157,7 +1204,7 @@ pub struct SyncSession {
 }
 
 impl SyncSession {
-    pub fn new<SA>(destination: SA, community: &[u8], timeout: Option<Duration>, starting_req_id: i32, version:i32) -> io::Result<Self>
+    pub fn new<SA>(destination: SA, community: &[u8], _timeout: Option<Duration>, starting_req_id: i32, version:i32) -> io::Result<Self>
         where SA: ToSocketAddrs
     {
         let socket = match destination.to_socket_addrs()?.next() {
@@ -1165,7 +1212,7 @@ impl SyncSession {
             Some(SocketAddr::V6(_)) => UdpSocket::bind((Ipv6Addr::new(0,0,0,0,0,0,0,0), 0))?,
             None => panic!("empty list of socket addrs"),
         };
-        socket.set_read_timeout(timeout)?;
+        // socket.set_read_timeout(timeout)?;
         socket.connect(destination)?;
         Ok(SyncSession {
             socket: socket,
@@ -1421,6 +1468,13 @@ pub fn get_oid_array(oid:&str) -> Vec<u32> {
     // to comvert to a slice add as_slice()
     oid.split('.').collect::<Vec<&str>>().iter().map(|x| x.parse::<u32>().unwrap_or(0)).collect::<Vec<u32>>()
     
+}
+pub fn get_ip_addr(oid:&str) -> [u8;4] { 
+    // to comvert to a slice add as_slice()
+    let vec =  oid.split('.').collect::<Vec<&str>>().iter().map(|x| x.parse::<u8>().unwrap_or(0)).collect::<Vec<u8>>() ;
+    let mut ret_data = [0;4] ;
+    ret_data.copy_from_slice(vec.as_slice()) ;
+    ret_data
 }
 
 pub fn get_str_from_oid_arr(arr: &[u32]) -> String {
