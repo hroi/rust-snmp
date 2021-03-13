@@ -107,7 +107,7 @@ use std::time::Duration;
 use serde::{Serialize, Deserialize};
 
 mod tokio_session ;
-mod async_session ;
+
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width="64")]
