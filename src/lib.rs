@@ -106,6 +106,8 @@ use std::ptr;
 use std::time::Duration;
 use serde::{Serialize, Deserialize};
 
+mod tokio_session ;
+mod async_session ;
 #[cfg(target_pointer_width="32")]
 const USIZE_LEN: usize = 4;
 #[cfg(target_pointer_width="64")]
@@ -1236,7 +1238,7 @@ impl SyncSession {
     }
 
     pub fn send_and_recv_repeat(socket: &UdpSocket, pdu: &pdu::Buf, out: &mut [u8], repeat:u32) -> SnmpResult<usize> {
-        let res = (0..repeat).filter_map(|_| Self::send_and_recv(socket, pdu, out).ok() ).next() ;
+        let res = (0..repeat).find_map(|_| Self::send_and_recv(socket, pdu, out).ok() );
         match res {
            Some(x) => Ok(x),
            None => Err(SnmpError::ReceiveError)
