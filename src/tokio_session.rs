@@ -59,8 +59,10 @@ impl TokioSession {
     
     async fn send_and_recv_repeat(socket: &mut UdpSocket, pdu: &pdu::Buf, out: &mut [u8], repeat:u32, timeout:Duration) -> SnmpResult<usize> {
         for _ in 0..repeat {
-            if let Ok(len) = time::timeout(timeout, Self::send_and_recv(socket, pdu, out)).await.unwrap() {
-                return Ok(len);
+            if let Ok(result) = time::timeout(timeout, Self::send_and_recv(socket, pdu, out)).await {
+                if let Ok(len) = result {
+                    return Ok(len);
+                }
             }
         }
         Err(SnmpError::ReceiveError)
