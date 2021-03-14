@@ -11,7 +11,7 @@ use crate::SnmpMessageType;
 use crate::pdu;
 use crate::Value;
 //use std::fmt ;
-
+use tokio::time::{self, Duration} ;
 const BUFFER_SIZE: usize = 4096;
 
 /// Asynchronous SNMP client for Tokio , so that it can work with actix 
@@ -57,9 +57,9 @@ impl TokioSession {
         }
     }
     
-    async fn send_and_recv_repeat(socket: &mut UdpSocket, pdu: &pdu::Buf, out: &mut [u8], repeat:u32) -> SnmpResult<usize> {
+    async fn send_and_recv_repeat(socket: &mut UdpSocket, pdu: &pdu::Buf, out: &mut [u8], repeat:u32, timeout:Duration) -> SnmpResult<usize> {
         for _ in 0..repeat {
-            if let Ok(len) = Self::send_and_recv(socket, pdu, out).await {
+            if let Ok(len) = time::timeout(timeout, Self::send_and_recv(socket, pdu, out)).await.unwrap() {
                 return Ok(len);
             }
         }
@@ -68,10 +68,10 @@ impl TokioSession {
     }
     
     
-    pub async fn get(&mut self, name: &[u32], repeat:u32) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn get(&mut self, name: &[u32], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat).await?;
+        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat, timeout).await?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
@@ -87,10 +87,10 @@ impl TokioSession {
         Ok(resp)
     }
 
-    pub async fn getnext(&mut self, name: &[u32], repeat:u32) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn getnext(&mut self, name: &[u32], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat).await?;
+        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat, timeout).await?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
@@ -106,10 +106,10 @@ impl TokioSession {
         Ok(resp)
     }
 
-    pub async fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32, repeat:u32) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn getbulk(&mut self, names: &[&[u32]], non_repeaters: u32, max_repetitions: u32, repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_getbulk(self.community.as_slice(), req_id, names, non_repeaters, max_repetitions, &mut self.send_pdu);
-        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat).await?;
+        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat, timeout).await?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
@@ -137,10 +137,10 @@ impl TokioSession {
     ///   - `Timeticks`
     ///   - `Opaque`
     ///   - `Counter64`
-    pub async fn set(&mut self, values: &[(&[u32], Value<'_>)], repeat:u32) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn set(&mut self, values: &[(&[u32], Value<'_>)], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_set(self.community.as_slice(), req_id, values, &mut self.send_pdu, self.version);
-        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat).await?;
+        let recv_len = Self::send_and_recv_repeat(&mut self.socket, &self.send_pdu, &mut self.recv_buf[..], repeat, timeout).await?;
         self.req_id += Wrapping(1);
         let pdu_bytes = &self.recv_buf[..recv_len];
         let resp = SnmpPdu::from_bytes(pdu_bytes)?;
