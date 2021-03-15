@@ -35,22 +35,22 @@ fn asn1_parse_getnext_pdu(b: &mut test::Bencher) {
     b.iter(|| {
         let mut reader = snmp::AsnReader::from_bytes(&pdu[..]);
         reader.read_asn_sequence(|rdr| {
-            let version = try!(rdr.read_asn_integer());
+            let version = rdr.read_asn_integer()?;
             assert_eq!(version, snmp::snmp::VERSION_2 as i64);
-            let community = try!(rdr.read_asn_octetstring());
+            let community = rdr.read_asn_octetstring()?;
             assert_eq!(community, b"tyS0n43d");
-            let msg_ident = try!(rdr.peek_byte());
+            let msg_ident = rdr.peek_byte()?;
             assert_eq!(msg_ident, snmp::snmp::MSG_GET_NEXT);
             rdr.read_constructed(msg_ident, |rdr| {
-                let req_id = try!(rdr.read_asn_integer());
-                let error_status = try!(rdr.read_asn_integer());
-                let error_index = try!(rdr.read_asn_integer());
+                let req_id = rdr.read_asn_integer()?;
+                let error_status = rdr.read_asn_integer()?;
+                let error_index = rdr.read_asn_integer()?;
                 assert_eq!(req_id, 1251699618);
                 assert_eq!(error_status, 0);
                 assert_eq!(error_index, 0);
                 rdr.read_asn_sequence(|rdr| {
                     rdr.read_asn_sequence(|rdr| {
-                        let name = try!(rdr.read_asn_objectidentifier());
+                        let name = rdr.read_asn_objectidentifier()?;
                         let expected = [1, 3, 6, 1, 2, 1, 1, 1, 0];
                         assert_eq!(name, &expected[..]);
                         rdr.read_asn_null()

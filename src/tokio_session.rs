@@ -10,6 +10,7 @@ use crate::SnmpError;
 use crate::SnmpMessageType;
 use crate::pdu;
 use crate::Value;
+use crate::{get_oid_array} ;
 //use std::fmt ;
 use tokio::time::{self, Duration} ;
 const BUFFER_SIZE: usize = 4096;
@@ -70,6 +71,12 @@ impl TokioSession {
     }
     
     
+    pub async fn get_oid(&mut self, oid: &str) -> SnmpResult<SnmpPdu<'_>> {
+        
+        self.get(get_oid_array(oid).as_slice(), 3u32, Duration::from_secs(1)).await
+
+    }
+
     pub async fn get(&mut self, name: &[u32], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_get(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);
@@ -88,7 +95,12 @@ impl TokioSession {
         }
         Ok(resp)
     }
+   
+    pub async fn get_nex_oid(&mut self, oid: &str) -> SnmpResult<SnmpPdu<'_>> {
+        
+        self.getnext(get_oid_array(oid).as_slice(), 3u32, Duration::from_secs(1)).await
 
+    }
     pub async fn getnext(&mut self, name: &[u32], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         let req_id = self.req_id.0;
         pdu::build_getnext(self.community.as_slice(), req_id, name, &mut self.send_pdu, self.version);

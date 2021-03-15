@@ -95,9 +95,9 @@
 #![cfg_attr(feature = "private-tests", feature(test))]
 #![allow(unknown_lints, doc_markdown)]
 extern crate serde;
-use std::num::ParseIntError;
+// use std::num::ParseIntError;
 use std::fmt;
-use std::str::FromStr;
+// use std::str::FromStr;
 use std::io;
 use std::mem;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs, UdpSocket};
@@ -552,6 +552,43 @@ pub mod pdu {
         });
     }
 
+    pub fn build_set_oids(community: &[u8], req_id: i32, values: &[(&str, u8, &str)], buf: &mut Buf, version:i32) {
+        buf.reset();
+        buf.push_sequence(|buf| {
+            buf.push_constructed(snmp::MSG_SET, |buf| {
+                buf.push_sequence(|buf| {
+                    for &(ref name, tag , ref val) in values.iter().rev() {
+                        buf.push_sequence(|buf| {
+                            use crate::get_oid_array ;
+                            use crate::get_ip_addr ;
+                            match tag {
+                                asn1::TYPE_BOOLEAN                  => buf.push_boolean(val.parse::<bool>().unwrap()),
+                                asn1::TYPE_NULL                     => buf.push_null(),
+                                asn1::TYPE_INTEGER                  => buf.push_integer(val.parse::<i64>().unwrap()),
+                                asn1::TYPE_OCTETSTRING           => buf.push_octet_string(val.as_bytes()),
+                                asn1::TYPE_OBJECTIDENTIFIER        =>   buf.push_object_identifier(get_oid_array(val).as_slice()),
+                                snmp::TYPE_IPADDRESS            =>  buf.push_ipaddress(&get_ip_addr(val)),
+                                snmp::TYPE_COUNTER32              => buf.push_counter32(val.parse::<u32>().unwrap()),
+                                snmp::TYPE_UNSIGNED32              => buf.push_unsigned32(val.parse::<u32>().unwrap()),
+                                snmp::TYPE_TIMETICKS              => buf.push_timeticks(val.parse::<u32>().unwrap()),
+                                snmp::TYPE_OPAQUE             => buf.push_opaque(val.as_bytes()),
+                                snmp::TYPE_COUNTER64              => buf.push_counter64(val.parse::<u64>().unwrap()),
+                                _ => unimplemented!(),
+                            }
+                            
+                            buf.push_object_identifier(get_oid_array(name).as_slice()); // name
+                        });
+                    }
+                });
+                buf.push_integer(0);
+                buf.push_integer(0);
+                buf.push_integer(req_id as i64);
+            });
+            buf.push_octet_string(community);
+            push_version(buf, version) ;
+        });
+    }
+
     pub fn build_set(community: &[u8], req_id: i32, values: &[(&[u32], Value)], buf: &mut Buf, version:i32) {
         buf.reset();
         buf.push_sequence(|buf| {
@@ -700,13 +737,50 @@ impl<'a> ObjectIdentifier<'a> {
             inner: bytes,
         }
     }
-    pub fn from_str<'b>(s: &str, buf:&'b mut pdu::Buf) -> ObjectIdentifier<'b> {
+    /*
+    pub fn from_str<'b>(s: &'b str) -> ObjectIdentifier<'a> {
        // let mut buf = pdu::Buf::default() ; create this out side the fucntion 
-        buf.push_object_identifier(get_oid_array(s).as_slice()) ;
-        let mut reader = AsnReader::from_bytes(&*buf);
-        reader.read_asn_objectidentifier().unwrap() 
-    }
+        
+        // buf.push_object_identifier(get_oid_array(s).as_slice()) ;
 
+        let mut obuf:[u8;1024] = [0;1024] ;
+        let oid_32 = get_oid_array(s) ;
+        let input = oid_32.as_slice() ;
+        
+        let mut pos = obuf.len() - 1;
+        let (head, tail) = input.split_at(2);
+        assert!(head[0] < 3 && head[1] < 40);
+
+        // encode the subids in reverse order
+        for subid in tail.iter().rev() {
+            let mut subid = *subid;
+            let mut last_byte = true;
+            loop {
+                assert!(pos != 0);
+                if last_byte {
+                        // continue bit is cleared
+                    obuf[pos] = (subid & 0b01111111) as u8;
+                    last_byte = false;
+                } else {
+                        // continue bit is set
+                    obuf[pos] = (subid | 0b10000000) as u8;
+                }
+                pos -= 1;
+                subid >>= 7;
+
+                if subid == 0 {
+                    break;
+                }
+            }
+        }
+
+            // encode the head last
+        obuf[pos] = (head[0] * 40 + head[1]) as u8;
+
+        ObjectIdentifier::from_bytes( &obuf[obuf.len() - pos..])
+        
+    }
+*/
     /// Reads out the OBJECT IDENTIFIER sub-IDs as a slice of u32s.
     /// Caller must provide storage for 128 sub-IDs.
     pub fn read_name<'b>(&self, out: &'b mut ObjIdBuf) -> SnmpResult<&'b [u32]> {
@@ -1071,7 +1145,7 @@ impl<'a>  Value<'a> {
             asn1::TYPE_NULL             => Value::Null,
             asn1::TYPE_INTEGER          => Value::Integer(value.parse::<i64>().unwrap()),
             asn1::TYPE_OCTETSTRING      => Value::OctetString(value.as_bytes()),
-          //  asn1::TYPE_OBJECTIDENTIFIER => Value::ObjectIdentifier(ObjectIdentifier::from_str(value,pdu::Buf::default()),
+           // asn1::TYPE_OBJECTIDENTIFIER => Value::ObjectIdentifier(ObjectIdentifier::from_str(value)),
           //  asn1::TYPE_SEQUENCE         => self.read_raw(ident).map(|v| Sequence(AsnReader::from_bytes(v))),
           //      asn1::TYPE_SET              => self.read_raw(ident).map(|v| Set(AsnReader::from_bytes(v))),
             snmp::TYPE_IPADDRESS        => Value::IpAddress(get_ip_addr(value)),
@@ -1483,20 +1557,35 @@ pub fn get_str_from_oid_arr(arr: &[u32]) -> String {
     arr.iter().map(|x| x.to_string()).collect::<Vec<String>>().join(".")
 }
 
-
-pub fn get_the_tag(value:&Value) -> u8 {
+pub fn read_oid(oid: &ObjectIdentifier) -> String {
+    let mut obuf: ObjIdBuf = unsafe {  mem::uninitialized() };
+    let req_oid = oid.read_name(&mut obuf).unwrap() ;
+    get_str_from_oid_arr(req_oid)
+}
+pub fn get_the_tag_value(value:&Value) -> (u8,String) {
     match value {
-        Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
-        Value::Integer(_n) => asn1::TYPE_INTEGER,
-        Value::OctetString(_slice)  => asn1::TYPE_OCTETSTRING,
-        Value::ObjectIdentifier(ref _obj_id) => asn1::TYPE_OBJECTIDENTIFIER,
-        Value::Null              => asn1::TYPE_NULL,
-        Value::IpAddress(_val)               => snmp::TYPE_IPADDRESS ,
-        Value::Counter32(_val)               => snmp::TYPE_COUNTER32,
-        Value::Unsigned32(_val)              => snmp::TYPE_UNSIGNED32,
-        Value::Timeticks(_val)               => snmp::TYPE_TIMETICKS,
-        Value::Opaque(_val)                  => snmp::TYPE_OPAQUE,
-        Value::Counter64(_val)               => snmp::TYPE_COUNTER64,
-        _ => asn1::TYPE_INTEGER,
+        Value::Boolean(v) => (asn1::TYPE_BOOLEAN, v.to_string()),
+        Value::Integer(n) => (asn1::TYPE_INTEGER, n.to_string()),
+        Value::OctetString(slice)  => (asn1::TYPE_OCTETSTRING, String::from_utf8_lossy(slice).to_string()),
+        Value::ObjectIdentifier(ref obj_id) => (asn1::TYPE_OBJECTIDENTIFIER, read_oid(obj_id)),
+        Value::Null              => (asn1::TYPE_NULL, "NULL".to_string()), 
+        Value::IpAddress(val)               => (snmp::TYPE_IPADDRESS , format!("{}.{}.{}.{}", val[0], val[1], val[2], val[3])),
+        Value::Counter32(n)               => (snmp::TYPE_COUNTER32,  n.to_string()),
+        Value::Unsigned32(n)              => (snmp::TYPE_UNSIGNED32, n.to_string()),
+        Value::Timeticks(n)               => (snmp::TYPE_TIMETICKS, n.to_string()),
+        Value::Opaque(slice)                  => (snmp::TYPE_OPAQUE,String::from_utf8_lossy(slice).to_string()) ,
+        Value::Counter64(n)               => (snmp::TYPE_COUNTER64,  n.to_string()),
+        _ => (asn1::TYPE_INTEGER, "unknown".to_string())
     }
 }
+/*
+pub fn get_the_value_from_tv(tv:(u8,&str)) -> Value {
+   let (tag, value ) = tv ;
+   match tag {
+    asn1::TYPE_BOOLEAN => Value::Boolean(value.parse::<bool>().unwrap()),
+    asn1::TYPE_INTEGER => Value::Integer(value.parse::<i64>().unwrap()),
+    asn1::TYPE_OCTETSTRING => Value::OctetString(value.as_bytes()),
+    asn1::TYPE_OBJECTIDENTIFIER => Value::ObjectIdentifier(value.as_bytes()),
+   }
+}
+*/
