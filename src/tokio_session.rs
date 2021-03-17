@@ -71,9 +71,9 @@ impl TokioSession {
     }
     
     
-    pub async fn get_oid(&mut self, oid: &str) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn get_oid(&mut self, oid: &str, repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         
-        self.get(get_oid_array(oid).as_slice(), 3u32, Duration::from_secs(1)).await
+        self.get(get_oid_array(oid).as_slice(),repeat, timeout).await
 
     }
 
@@ -96,9 +96,9 @@ impl TokioSession {
         Ok(resp)
     }
    
-    pub async fn get_nex_oid(&mut self, oid: &str) -> SnmpResult<SnmpPdu<'_>> {
+    pub async fn get_oid_next(&mut self, oid: &str, repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
         
-        self.getnext(get_oid_array(oid).as_slice(), 3u32, Duration::from_secs(1)).await
+        self.getnext(get_oid_array(oid).as_slice(), repeat, timeout).await
 
     }
     pub async fn getnext(&mut self, name: &[u32], repeat:u32, timeout:Duration) -> SnmpResult<SnmpPdu<'_>> {
