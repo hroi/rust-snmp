@@ -154,6 +154,28 @@ impl fmt::Display for SnmpError {
     }
 }
 
+impl std::error::Error for SnmpError {
+    fn description(&self) -> &str {
+        match *self {
+            SnmpError::AsnParseError   => "ASN Parse Error",
+            SnmpError::AsnInvalidLen  => "ASN Invalid length",
+            SnmpError::AsnWrongType   => "Wrong ASN Type",
+            SnmpError::AsnUnsupportedType => "UnSupported ASN Type",
+            SnmpError::AsnEof => "End of ASN ",
+            SnmpError::AsnIntOverflow => "ASN Overflow",
+            SnmpError::UnsupportedVersion => "Unsupported Snmp Version",
+            SnmpError::RequestIdMismatch => "SNMP Request ID mismatch",
+            SnmpError::CommunityMismatch => "Community mismatch",
+            SnmpError::ValueOutOfRange => "Value out of range",
+            SnmpError::SendError => "Snmp PDU Send Error",
+            SnmpError::ReceiveError => "Snmp Receive Error",
+        }
+    }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+       None
+    }
+}
+
 type SnmpResult<T> = Result<T, SnmpError>;
 
 const BUFFER_SIZE: usize = 4096;
