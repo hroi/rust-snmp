@@ -1,13 +1,14 @@
 use super::{AsnReader, SnmpError};
 use super::{pdu, snmp};
 
+
 #[test]
 fn build_getnext_pdu() {
     let mut pdu = pdu::Buf::default();
     pdu::build_getnext(b"tyS0n43d",
                        1251699618,
                        &[1, 3, 6, 1, 2, 1, 1, 1, 0],
-                       &mut pdu);
+                       &mut pdu, 1);
 
     let expected = &[0x30, 0x2b, 0x02, 0x01, 0x01, 0x04, 0x08, 0x74, 0x79, 0x53, 0x30, 0x6e,
                      0x34, 0x33, 0x64, 0xa1, 0x1c, 0x02, 0x04, 0x4a, 0x9b, 0x6b, 0xa2, 0x02,
@@ -19,6 +20,9 @@ fn build_getnext_pdu() {
 
     assert_eq!(&pdu[..], &expected[..]);
 }
+
+
+
 
 #[test]
 fn asn_read_byte() {

@@ -8,3 +8,11 @@ repository = "https://github.com/hroi/rust-snmp"
 documentation = "https://docs.rs/crate/snmp"
 readme = "README.md"
 keywords = ["networking", "snmp", "monitoring"]
+edition = "2018"
+
+[dependencies]
+tokio = "0.2"
+tokio-test = "0.2.1" 
+tokio-util = { version = "0.3", features = [ "codec", "udp" ] }
+serde = { version = "1.0.123", features = ["derive"] }
+
