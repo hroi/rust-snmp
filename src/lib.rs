@@ -92,8 +92,8 @@
 //! }
 //! ```
 
-#![cfg_attr(feature = "private-tests", feature(test))]
-#![allow(unknown_lints, doc_markdown)]
+// #![cfg_attr(feature = "private-tests", feature(test))]
+// #![allow(unknown_lints, doc_markdown)]
 extern crate serde;
 // use std::num::ParseIntError;
 use std::fmt;
@@ -181,7 +181,7 @@ type SnmpResult<T> = Result<T, SnmpError>;
 const BUFFER_SIZE: usize = 4096;
 
 pub mod asn1 {
-    #![allow(dead_code, identity_op, eq_op)]
+   // #![allow(dead_code, identity_op, eq_op)]
 
     pub const PRIMITIVE:             u8 = 0b00000000;
     pub const CONSTRUCTED:           u8 = 0b00100000;
@@ -201,7 +201,7 @@ pub mod asn1 {
 }
 
 pub mod snmp {
-    #![allow(dead_code, identity_op, eq_op)]
+   // #![allow(dead_code, identity_op, eq_op)]
 
     use super::asn1;
     pub const VERSION_1:    i64 = 0;
@@ -272,7 +272,16 @@ pub mod pdu {
         fn default() -> Buf {
             Buf {
                 len: 0,
-                buf: unsafe { mem::uninitialized() },
+               // buf: unsafe { mem::uninitialized() },
+                buf: {
+                    let mut buf: [std::mem::MaybeUninit<u8>; BUFFER_SIZE] = unsafe {
+                        std::mem::MaybeUninit::uninit().assume_init()
+                    };
+                    for elem in &mut buf[..] {
+                        unsafe { std::ptr::write(elem.as_mut_ptr(),0); }
+                    }
+                    unsafe { std::mem::transmute::<_, [u8; BUFFER_SIZE]>(buf) }
+                }
             }
         }
     }
@@ -410,7 +419,7 @@ pub mod pdu {
             };
             n = n.to_be();
             let count = unsafe {
-                let mut wbuf = self.available();
+                let wbuf = self.available();
                 let mut src_ptr = &n as *const i64 as *const u8;
                 let mut dst_ptr = wbuf.as_mut_ptr()
                     .offset((wbuf.len() - mem::size_of::<i64>()) as isize);
@@ -717,7 +726,15 @@ pub type ObjIdBuf = [u32; 128];
 
 impl<'a> fmt::Display for ObjectIdentifier<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf = {
+            let mut buf: [std::mem::MaybeUninit<u32>; 128] = unsafe {
+                std::mem::MaybeUninit::uninit().assume_init()
+            };
+            for elem in &mut buf[..] {
+                unsafe { std::ptr::write(elem.as_mut_ptr(),0); }
+            }
+            unsafe { std::mem::transmute::<_, [u32; 128]>(buf) }
+        };
         let mut first = true;
         match self.read_name(&mut buf) {
             Ok(name) => {
@@ -738,7 +755,17 @@ impl<'a> fmt::Display for ObjectIdentifier<'a> {
 
 impl<'a> PartialEq<[u32]> for ObjectIdentifier<'a> {
     fn eq(&self, other: &[u32]) -> bool {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        // let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf = {
+            let mut buf: [std::mem::MaybeUninit<u32>; 128] = unsafe {
+                std::mem::MaybeUninit::uninit().assume_init()
+            };
+            for elem in &mut buf[..] {
+                unsafe { std::ptr::write(elem.as_mut_ptr(),0); }
+            }
+            unsafe { std::mem::transmute::<_, [u32; 128]>(buf) }
+        };
+
         if let Ok(name) = self.read_name(&mut buf) {
             name == other
         } else {
@@ -1580,7 +1607,16 @@ pub fn get_str_from_oid_arr(arr: &[u32]) -> String {
 }
 
 pub fn read_oid(oid: &ObjectIdentifier) -> String {
-    let mut obuf: ObjIdBuf = unsafe {  mem::uninitialized() };
+   // let mut obuf: ObjIdBuf = unsafe {  mem::uninitialized() };
+    let mut obuf = {
+        let mut obuf: [std::mem::MaybeUninit<u32>; 128] = unsafe {
+            std::mem::MaybeUninit::uninit().assume_init()
+        };
+        for elem in &mut obuf[..] {
+            unsafe { std::ptr::write(elem.as_mut_ptr(), 0); }
+        }
+        unsafe { std::mem::transmute::<_, [u32; 128]>(obuf) }
+    };
     let req_oid = oid.read_name(&mut obuf).unwrap() ;
     get_str_from_oid_arr(req_oid)
 }
@@ -1598,6 +1634,22 @@ pub fn get_the_tag_value(value:&Value) -> (u8,String) {
         Value::Opaque(slice)                  => (snmp::TYPE_OPAQUE,String::from_utf8_lossy(slice).to_string()) ,
         Value::Counter64(n)               => (snmp::TYPE_COUNTER64,  n.to_string()),
         _ => (asn1::TYPE_INTEGER, "unknown".to_string())
+    }
+}
+pub fn get_the_tag(value:&Value) -> u8 {
+    match value {
+        Value::Boolean(_v) => asn1::TYPE_BOOLEAN,
+        Value::Integer(_n) => asn1::TYPE_INTEGER,
+        Value::OctetString(_slice)  => asn1::TYPE_OCTETSTRING, 
+        Value::ObjectIdentifier(ref _obj_id) => asn1::TYPE_OBJECTIDENTIFIER,
+        Value::Null              => asn1::TYPE_NULL,
+        Value::IpAddress(_val)               => snmp::TYPE_IPADDRESS ,
+        Value::Counter32(_n)               => snmp::TYPE_COUNTER32,
+        Value::Unsigned32(_n)              => snmp::TYPE_UNSIGNED32,
+        Value::Timeticks(_n)               => snmp::TYPE_TIMETICKS,
+        Value::Opaque(_slice)                  => snmp::TYPE_OPAQUE,
+        Value::Counter64(_n)               => snmp::TYPE_COUNTER64,
+        _ => asn1::TYPE_INTEGER
     }
 }
 /*
