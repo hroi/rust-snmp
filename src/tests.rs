@@ -1,7 +1,6 @@
 use super::{AsnReader, SnmpError};
 use super::{pdu, snmp};
 
-
 #[test]
 fn build_getnext_pdu() {
     let mut pdu = pdu::Buf::default();
