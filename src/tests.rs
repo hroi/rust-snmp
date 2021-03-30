@@ -70,13 +70,4 @@ fn asn_parse_getnext_pdu() {
             })
         })
     }).unwrap();
-    /*
-    let mut sess = SyncSession::new("10.0.251.15:161", b"sTrnG4u2w2SW",
-        Some(Duration::from_secs(20)), 0).unwrap();
-    let mut response = sess.getnext(&[1,3,6,1,2,1,1,1,]).unwrap();
-    if let Some((_oid, Value::OctetString(sys_descr))) = response.varbinds.next() {
-        println!("{}", String::from_utf8_lossy(sys_descr));
-    }
-
-     */
 }

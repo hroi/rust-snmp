@@ -223,7 +223,7 @@ pub mod pdu {
         fn default() -> Buf {
             Buf {
                 len: 0,
-                buf: unsafe { mem::uninitialized() },
+                buf: unsafe { mem::MaybeUninit::uninit().assume_init() },
             }
         }
     }
@@ -267,6 +267,7 @@ pub mod pdu {
             where F: FnMut(&mut Self)
         {
             let before_len = self.len;
+
             f(self);
             let written = self.len - before_len;
             self.push_length(written);
@@ -624,7 +625,7 @@ pub type ObjIdBuf = [u32; 128];
 
 impl<'a> fmt::Display for ObjectIdentifier<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf: ObjIdBuf = unsafe { mem::MaybeUninit::uninit().assume_init() };
         let mut first = true;
         match self.read_name(&mut buf) {
             Ok(name) => {
@@ -645,7 +646,7 @@ impl<'a> fmt::Display for ObjectIdentifier<'a> {
 
 impl<'a> PartialEq<[u32]> for ObjectIdentifier<'a> {
     fn eq(&self, other: &[u32]) -> bool {
-        let mut buf: ObjIdBuf = unsafe { mem::uninitialized() };
+        let mut buf: ObjIdBuf = unsafe { mem::MaybeUninit::uninit().assume_init() };
         if let Ok(name) = self.read_name(&mut buf) {
             name == other
         } else {
